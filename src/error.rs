@@ -1,4 +1,4 @@
-/// Errors used throughout this crate.
+/// Error type used throughout this crate.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     /// The OID value is not recognized.
@@ -40,6 +40,10 @@ pub enum Error {
         /// Actual key length in bytes.
         got: usize,
     },
+    /// The public key embedded in a private-key encoding does not match it.
+    #[cfg(feature = "pkcs8")]
+    #[error("Embedded public key does not match the private key")]
+    PublicKeyMismatch,
     /// The provided signature has an incorrect length.
     #[error("Invalid signature length: expected {expected}, got {got}")]
     InvalidSignatureLength {
@@ -48,13 +52,13 @@ pub enum Error {
         /// Actual signature length in bytes.
         got: usize,
     },
-    /// PKCS#8 errors.
+    /// A PKCS#8 error.
     #[cfg(feature = "pkcs8")]
     #[error("PKCS#8 error: {0}")]
     Pkcs8(pkcs8::Error),
 }
 
-/// Result type used by this crate.
+/// Result type used throughout this crate.
 pub type XmssResult<T> = Result<T, Error>;
 
 #[cfg(feature = "pkcs8")]

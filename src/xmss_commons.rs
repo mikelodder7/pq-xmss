@@ -8,7 +8,7 @@ use crate::utils::bytes_to_ull;
 use crate::wots::{wots_pk_from_sig, wots_pkgen};
 
 /// Computes a leaf node from a WOTS public key using an L-tree.
-/// Note that this destroys the used WOTS public key.
+/// This operation destroys the WOTS public key it uses.
 fn l_tree(
     params: &XmssParams,
     leaf: &mut [u8],
@@ -54,7 +54,7 @@ fn l_tree(
     Ok(())
 }
 
-/// Computes a root node given a leaf and an auth path.
+/// Computes a root node from a leaf and an authentication path.
 fn compute_root(
     params: &XmssParams,
     root: &mut [u8],
@@ -100,8 +100,8 @@ fn compute_root(
     thash_h(params, root, &buffer, pub_seed, addr)
 }
 
-/// Computes the leaf at a given address. First generates the WOTS key pair,
-/// then computes leaf using l_tree.
+/// Computes the leaf at a given address. It first generates the WOTS key pair,
+/// then computes the leaf using `l_tree`.
 pub fn gen_leaf_wots(
     params: &XmssParams,
     leaf: &mut [u8],
@@ -116,8 +116,8 @@ pub fn gen_leaf_wots(
     l_tree(params, leaf, &mut pk, pub_seed, ltree_addr)
 }
 
-/// Verifies a given message signature pair under a given public key.
-/// Note that this assumes a pk without an OID, i.e. [root || PUB_SEED].
+/// Verifies a given message-signature pair under a given public key.
+/// This operation expects a public key without an OID: `[root || PUB_SEED]`.
 pub fn xmssmt_core_sign_open(
     params: &XmssParams,
     m: &mut Vec<u8>,

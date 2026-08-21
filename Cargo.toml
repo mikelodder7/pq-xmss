@@ -1,65 +1,72 @@
 [package]
-name = "xmss"
-version = "0.1.0-pre.1"
 authors = ["Michael Lodder <redmike7@gmail.com>"]
+categories = ["cryptography"]
 description = """
 Pure Rust implementation of XMSS (eXtended Merkle Signature Scheme)
 as described in RFC 8391 and SP 800-208
 """
-license = "Apache-2.0 OR MIT"
 edition = "2024"
-homepage = "https://github.com/RustCrypto/signature/tree/master/xmss"
-repository = "https://github.com/RustCrypto/signatures"
-readme = "README.md"
-categories = ["cryptography"]
+homepage = "https://github.com/RustCrypto/pq-xmss"
 keywords = ["xmss", "signature", "crypto", "cryptography", "rfc8391"]
+license = "Apache-2.0 OR MIT"
+name = "pq-xmss"
+readme = "README.md"
+repository = "https://github.com/RustCrypto/pq-xmss"
 rust-version = "1.85"
+version = "0.1.0"
+
+[[bench]]
+harness = false
+name = "signing"
+required-features = ["extra-depths"]
 
 [features]
 default = []
-serde = ["dep:serdect"]
+extra-depths = []
 pkcs8 = ["dep:pkcs8", "dep:spki", "dep:der", "dep:const-oid"]
+serde = ["dep:serdect"]
 
 [dependencies]
-const-oid = { version = "0.10", optional = true }
-der = { version = "0.8", optional = true, default-features = false, features = ["alloc"] }
+const-oid = { optional = true, version = "0.10" }
+der = { default-features = false, features = ["alloc"], optional = true, version = "0.8" }
 digest = "0.11"
-hybrid-array = { version = "0.4", features = ["zeroize"] }
-pkcs8 = { version = "0.11", optional = true, default-features = false, features = ["alloc"] }
+hybrid-array = { features = ["zeroize"], version = "0.4" }
+pkcs8 = { default-features = false, features = ["alloc"], optional = true, version = "0.11" }
 rand = "0.10"
+serdect = { features = ["alloc"], optional = true, version = "0.4" }
 sha2 = "0.11"
 shake = "0.1"
-serdect = { version = "0.4", features = ["alloc"], optional = true }
 signature = "3"
-spki = { version = "0.8", optional = true, default-features = false, features = ["alloc"] }
+spki = { default-features = false, features = ["alloc"], optional = true, version = "0.8" }
 subtle = "2.6"
 thiserror = "2"
 zeroize = "1"
 
 [dev-dependencies]
-postcard = { version = "1", features = ["alloc"] }
+postcard = { features = ["alloc"], version = "1" }
 serde_json = "1"
 
 [lints.rust]
-missing_docs = "deny"
 missing_debug_implementations = "deny"
+missing_docs = "deny"
 trivial_casts = "deny"
 trivial_numeric_casts = "deny"
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage)'] }
 unsafe_code = "deny"
 unstable_features = "deny"
-unused_import_braces = "deny"
-unused_parens = "deny"
-unused_lifetimes = "deny"
-unused_qualifications = "deny"
 unused_extern_crates = "deny"
+unused_import_braces = "deny"
+unused_lifetimes = "deny"
+unused_parens = "deny"
+unused_qualifications = "deny"
 
 [lints.clippy]
-unwrap_used = "deny"
-cast_precision_loss = "warn"
 cast_possible_truncation = "warn"
 cast_possible_wrap = "warn"
+cast_precision_loss = "warn"
 cast_sign_loss = "warn"
 checked_conversions = "warn"
 mod_module_files = "warn"
 panic = "warn"
 panic_in_result_fn = "warn"
+unwrap_used = "deny"

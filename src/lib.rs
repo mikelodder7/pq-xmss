@@ -1,6 +1,7 @@
 //! XMSS (eXtended Merkle Signature Scheme) implementation in Rust.
 //!
-//! Implements RFC 8391 XMSS and XMSSMT hash-based signature schemes.
+//! Implements the XMSS and XMSS^MT hash-based signature schemes from RFC 8391.
+#![doc = include_str!("../docs/extra-depths.md")]
 
 mod error;
 mod hash;
@@ -99,15 +100,46 @@ pub use params::{
     XmssShake256_20_256,
 };
 
+#[cfg(feature = "extra-depths")]
+pub use params::{
+    H1, H2, H3, H4, H5, H6, H7, H8, H9, H11, H12, H13, H14, H15, H17, H18, H19, H21, H22, H23, H24,
+    XmssSha2_192, XmssSha2_256, XmssSha2_512, XmssShake_256, XmssShake_512, XmssShake256_192,
+    XmssShake256_256, XmssTreeDepth,
+};
+
 pub use xmss::{DetachedSignature, KeyPair, Signature, SigningKey, VerifyingKey};
 
 #[cfg(test)]
 mod tests {
+    use std::sync::OnceLock;
+
     use super::*;
 
+    // Instrumenting the standard trees multiplies coverage runtime dramatically.
+    // Full test runs use the standardized height, while coverage uses the same
+    // control-flow paths with a small tree.
+    #[cfg(all(coverage, feature = "extra-depths"))]
+    type TestParams = XmssSha2_256<H2>;
+    #[cfg(not(all(coverage, feature = "extra-depths")))]
+    type TestParams = XmssSha2_10_256;
+
+    fn xmss_test_keypair() -> KeyPair<TestParams> {
+        static KEYPAIR: OnceLock<KeyPair<TestParams>> = OnceLock::new();
+        KEYPAIR
+            .get_or_init(|| KeyPair::<TestParams>::generate(&mut rand::rng()).unwrap())
+            .clone()
+    }
+
+    fn xmssmt_test_keypair() -> KeyPair<XmssMtSha2_20_2_256> {
+        static KEYPAIR: OnceLock<KeyPair<XmssMtSha2_20_2_256>> = OnceLock::new();
+        KEYPAIR
+            .get_or_init(|| KeyPair::<XmssMtSha2_20_2_256>::generate(&mut rand::rng()).unwrap())
+            .clone()
+    }
+
     #[test]
-    fn test_xmss_sha2_10_256_sign_verify() {
-        let mut kp = KeyPair::<XmssSha2_10_256>::generate(&mut rand::rng()).unwrap();
+    fn test_xmss_sign_verify() {
+        let mut kp = xmss_test_keypair();
 
         let message = b"test message";
         let sig = kp.signing_key().sign(message).unwrap();
@@ -117,16 +149,16 @@ mod tests {
     }
 
     #[test]
-    fn test_xmss_sha2_10_256_bad_signature() {
-        let mut kp = KeyPair::<XmssSha2_10_256>::generate(&mut rand::rng()).unwrap();
+    fn test_xmss_bad_signature() {
+        let mut kp = xmss_test_keypair();
 
         let message = b"test message";
         let sig = kp.signing_key().sign(message).unwrap();
 
-        // Corrupt the signature
+        // Corrupt the signature.
         let mut sig_bytes = sig.as_ref().to_vec();
         sig_bytes[10] ^= 0xFF;
-        let bad_sig = Signature::<XmssSha2_10_256>::try_from(sig_bytes).unwrap();
+        let bad_sig = Signature::<TestParams>::try_from(sig_bytes).unwrap();
 
         let result = kp.verifying_key().verify(&bad_sig);
         assert!(result.is_err());
@@ -134,7 +166,7 @@ mod tests {
 
     #[test]
     fn test_xmssmt_sha2_20_2_256_sign_verify() {
-        let mut kp = KeyPair::<XmssMtSha2_20_2_256>::generate(&mut rand::rng()).unwrap();
+        let mut kp = xmssmt_test_keypair();
 
         let message = b"test message for xmssmt";
         let sig = kp.signing_key().sign(message).unwrap();
@@ -144,8 +176,141 @@ mod tests {
     }
 
     #[test]
+    fn test_xmssmt_key_encoding_roundtrip() {
+        let kp = xmssmt_test_keypair();
+        let signing_key =
+            SigningKey::<XmssMtSha2_20_2_256>::try_from(kp.signing_key_ref().as_ref()).unwrap();
+        let verifying_key =
+            VerifyingKey::<XmssMtSha2_20_2_256>::try_from(kp.verifying_key().as_ref()).unwrap();
+
+        assert_eq!(signing_key, *kp.signing_key_ref());
+        assert_eq!(verifying_key, *kp.verifying_key());
+    }
+
+    #[cfg(feature = "extra-depths")]
+    #[test]
+    fn test_extra_depth_sizes_and_capacities() {
+        fn check<D: XmssTreeDepth>() {
+            assert_eq!(D::MAX_SIGNATURES, 1 << D::HEIGHT);
+
+            assert_eq!(XmssSha2_192::<D>::SK_LEN, 104);
+            assert_eq!(XmssSha2_192::<D>::VK_LEN, 52);
+            assert_eq!(XmssSha2_192::<D>::SIG_LEN, 1252 + 24 * D::HEIGHT as usize);
+
+            assert_eq!(XmssSha2_256::<D>::SK_LEN, 136);
+            assert_eq!(XmssSha2_256::<D>::VK_LEN, 68);
+            assert_eq!(XmssSha2_256::<D>::SIG_LEN, 2180 + 32 * D::HEIGHT as usize);
+
+            assert_eq!(XmssSha2_512::<D>::SK_LEN, 264);
+            assert_eq!(XmssSha2_512::<D>::VK_LEN, 132);
+            assert_eq!(XmssSha2_512::<D>::SIG_LEN, 8452 + 64 * D::HEIGHT as usize);
+
+            assert_eq!(XmssShake_256::<D>::SIG_LEN, XmssSha2_256::<D>::SIG_LEN);
+            assert_eq!(XmssShake_512::<D>::SIG_LEN, XmssSha2_512::<D>::SIG_LEN);
+            assert_eq!(XmssShake256_192::<D>::SIG_LEN, XmssSha2_192::<D>::SIG_LEN);
+            assert_eq!(XmssShake256_256::<D>::SIG_LEN, XmssSha2_256::<D>::SIG_LEN);
+        }
+
+        check::<H1>();
+        check::<H2>();
+        check::<H3>();
+        check::<H4>();
+        check::<H5>();
+        check::<H6>();
+        check::<H7>();
+        check::<H8>();
+        check::<H9>();
+        check::<H11>();
+        check::<H12>();
+        check::<H13>();
+        check::<H14>();
+        check::<H15>();
+        check::<H17>();
+        check::<H18>();
+        check::<H19>();
+        check::<H21>();
+        check::<H22>();
+        check::<H23>();
+        check::<H24>();
+    }
+
+    #[cfg(feature = "extra-depths")]
+    #[test]
+    fn test_extra_depth_h1_roundtrip_and_exhaustion() {
+        type Params = XmssSha2_256<H1>;
+
+        let mut kp = KeyPair::<Params>::generate(&mut rand::rng()).unwrap();
+        assert_eq!(kp.verifying_key().as_ref().len(), Params::VK_LEN);
+        assert_eq!(&kp.verifying_key().as_ref()[..4], &[0xff, 0x01, 0x00, 0x01]);
+
+        let signing_key = SigningKey::<Params>::try_from(kp.signing_key_ref().as_ref()).unwrap();
+        let verifying_key = VerifyingKey::<Params>::try_from(kp.verifying_key().as_ref()).unwrap();
+        assert_eq!(signing_key, *kp.signing_key_ref());
+        assert_eq!(verifying_key, *kp.verifying_key());
+
+        let first = kp.signing_key().sign_detached(b"first").unwrap();
+        assert_eq!(first.as_ref().len(), Params::SIG_LEN);
+        kp.verifying_key()
+            .verify_detached(&first, b"first")
+            .unwrap();
+        assert_eq!(&kp.signing_key().as_ref()[4..8], &[0, 0, 0, 1]);
+
+        let second = kp.signing_key().sign_detached(b"second").unwrap();
+        kp.verifying_key()
+            .verify_detached(&second, b"second")
+            .unwrap();
+        assert_eq!(&kp.signing_key().as_ref()[4..8], &[0xff; 4]);
+        assert!(kp.signing_key().as_ref()[8..].iter().all(|byte| *byte == 0));
+
+        assert!(matches!(
+            kp.signing_key().sign_detached(b"exhausted"),
+            Err(Error::KeyExhausted)
+        ));
+    }
+
+    #[cfg(feature = "extra-depths")]
+    #[test]
+    fn test_extra_depth_parameter_ids_are_unique() {
+        let ids = [
+            XmssSha2_256::<H1>::OID,
+            XmssSha2_256::<H2>::OID,
+            XmssSha2_256::<H3>::OID,
+            XmssSha2_256::<H4>::OID,
+            XmssSha2_256::<H5>::OID,
+            XmssSha2_256::<H6>::OID,
+            XmssSha2_256::<H7>::OID,
+            XmssSha2_256::<H8>::OID,
+            XmssSha2_256::<H9>::OID,
+            XmssSha2_256::<H11>::OID,
+            XmssSha2_256::<H12>::OID,
+            XmssSha2_256::<H13>::OID,
+            XmssSha2_256::<H14>::OID,
+            XmssSha2_256::<H15>::OID,
+            XmssSha2_256::<H17>::OID,
+            XmssSha2_256::<H18>::OID,
+            XmssSha2_256::<H19>::OID,
+            XmssSha2_256::<H21>::OID,
+            XmssSha2_256::<H22>::OID,
+            XmssSha2_256::<H23>::OID,
+            XmssSha2_256::<H24>::OID,
+        ];
+
+        for (position, id) in ids.iter().enumerate() {
+            assert_eq!(
+                id & 0xff,
+                [
+                    1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 13, 14, 15, 17, 18, 19, 21, 22, 23, 24
+                ][position]
+            );
+            assert_eq!(ids.iter().filter(|candidate| *candidate == id).count(), 1);
+        }
+
+        assert_ne!(XmssSha2_256::<H1>::OID, XmssShake256_256::<H1>::OID);
+    }
+
+    #[test]
     fn test_multiple_signatures() {
-        let mut kp = KeyPair::<XmssSha2_10_256>::generate(&mut rand::rng()).unwrap();
+        let mut kp = xmss_test_keypair();
 
         for i in 0..3 {
             let msg = format!("message {}", i);
@@ -155,20 +320,49 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "extra-depths")]
+    #[test]
+    fn test_compact_key_reload_matches_in_memory_traversal() {
+        type Params = XmssSha2_256<H3>;
+
+        let seed: Vec<u8> = (0u8..Params::SEED_LEN as u8).collect();
+        let mut keypair = KeyPair::<Params>::from_seed(&seed).unwrap();
+        let verifying_key = keypair.verifying_key().clone();
+
+        for index in 0u32..8 {
+            let persisted = keypair.signing_key().as_ref().to_vec();
+            assert_eq!(persisted.len(), Params::SK_LEN);
+            let mut reloaded = SigningKey::<Params>::try_from(persisted).unwrap();
+            let message = index.to_be_bytes();
+
+            let cached_signature = keypair.signing_key().sign_detached(&message).unwrap();
+            let rebuilt_signature = reloaded.sign_detached(&message).unwrap();
+            assert_eq!(cached_signature, rebuilt_signature);
+            verifying_key
+                .verify_detached(&cached_signature, &message)
+                .unwrap();
+        }
+
+        assert!(matches!(
+            keypair.signing_key().sign_detached(b"exhausted"),
+            Err(Error::KeyExhausted)
+        ));
+    }
+
     #[test]
     fn test_xmss_sign_detached_verify() {
-        let mut kp = KeyPair::<XmssSha2_10_256>::generate(&mut rand::rng()).unwrap();
+        let mut kp = xmss_test_keypair();
 
         let message = b"detached test message";
         let sig = kp.signing_key().sign_detached(message).unwrap();
 
-        // Detached signature should not contain the message
+        // A detached signature should not contain the message.
         let full_sig = kp.signing_key().sign(b"another").unwrap();
         assert!(sig.as_ref().len() < full_sig.as_ref().len());
 
         kp.verifying_key().verify_detached(&sig, message).unwrap();
 
-        // Wrong message should fail
+        // Verification of the wrong message should fail.
         assert!(
             kp.verifying_key()
                 .verify_detached(&sig, b"wrong message")
@@ -178,24 +372,25 @@ mod tests {
 
     #[test]
     fn test_xmss_verify_truncated_signature() {
-        let mut kp = KeyPair::<XmssSha2_10_256>::generate(&mut rand::rng()).unwrap();
+        let mut kp = xmss_test_keypair();
 
         let sig = kp.signing_key().sign(b"test message").unwrap();
 
-        // Truncate the signature to be too short
+        // Truncate the signature so that it is too short.
         let short_bytes = &sig.as_ref()[..sig.as_ref().len() / 2];
-        let short_sig = Signature::<XmssSha2_10_256>::try_from(short_bytes).unwrap();
+        let short_sig = Signature::<TestParams>::try_from(short_bytes).unwrap();
 
         assert!(kp.verifying_key().verify(&short_sig).is_err());
     }
 
+    #[cfg(not(all(coverage, feature = "extra-depths")))]
     #[test]
     fn test_key_exhaustion() {
-        let mut kp = KeyPair::<XmssSha2_10_256>::generate(&mut rand::rng()).unwrap();
+        let mut kp = xmss_test_keypair();
 
         // Modify the index to be at the last valid position (2^10 - 1 = 1023).
         let mut sk_bytes = kp.signing_key().as_ref().to_vec();
-        // Index is at bytes[4..8] (after OID), big-endian.
+        // The big-endian index occupies bytes[4..8], after the OID.
         sk_bytes[4] = 0x00;
         sk_bytes[5] = 0x00;
         sk_bytes[6] = 0x03;
@@ -214,16 +409,16 @@ mod tests {
 
     #[test]
     fn test_deterministic_keygen() {
-        // Sequential seed pattern: SK_SEED || SK_PRF || PUB_SEED
+        // Sequential seed pattern: SK_SEED || SK_PRF || PUB_SEED.
         let seed: Vec<u8> = (0u8..96).collect();
 
-        let kp1 = KeyPair::<XmssSha2_10_256>::from_seed(&seed).unwrap();
-        let mut kp2 = KeyPair::<XmssSha2_10_256>::from_seed(&seed).unwrap();
+        let kp1 = KeyPair::<TestParams>::from_seed(&seed).unwrap();
+        let mut kp2 = KeyPair::<TestParams>::from_seed(&seed).unwrap();
 
         // Same seed must produce identical keys.
         assert_eq!(kp1.verifying_key(), kp2.verifying_key());
 
-        // Sign with one, verify with the other's public key.
+        // Sign with one and verify with the other's public key.
         let sig = kp2.signing_key().sign(b"deterministic test").unwrap();
         let recovered = kp1.verifying_key().verify(&sig).unwrap();
         assert_eq!(recovered, b"deterministic test");
@@ -231,9 +426,9 @@ mod tests {
 
     #[test]
     fn test_verifying_key_from_signing_key() {
-        let kp = KeyPair::<XmssSha2_10_256>::generate(&mut rand::rng()).unwrap();
+        let kp = xmss_test_keypair();
 
-        // Derive verifying key from signing key.
+        // Derive the verifying key from the signing key.
         let derived_pk = VerifyingKey::from(kp.signing_key_ref());
         assert_eq!(kp.verifying_key(), &derived_pk);
     }
@@ -247,7 +442,7 @@ mod tests {
             .collect()
     }
 
-    /// KAT verification test using liboqs XMSS-SHA2_10_256 known-answer test vectors.
+    /// KAT verification test using the liboqs XMSS-SHA2_10_256 known-answer test vectors.
     #[test]
     fn test_kat_xmss_sha2_10_256_verify() {
         let pk_hex = "00000001B901B8D9332FE458EB6DE87AF74655D0B5AD936A66FDB6AC9D1B8CF25BB6DB8404562AD35E8ECAFAAFDA16981CDAA147606BEEA62801342AF13C8B5535F72F94";
@@ -365,61 +560,61 @@ mod tests {
 
         #[test]
         fn test_signing_key_serde_json_roundtrip() {
-            let mut kp = KeyPair::<XmssSha2_10_256>::generate(&mut rand::rng()).unwrap();
+            let mut kp = xmss_test_keypair();
             let sk = kp.signing_key();
 
             let json = serde_json::to_string(&*sk).unwrap();
-            let sk2: SigningKey<XmssSha2_10_256> = serde_json::from_str(&json).unwrap();
+            let sk2: SigningKey<TestParams> = serde_json::from_str(&json).unwrap();
             assert_eq!(*sk, sk2);
         }
 
         #[test]
         fn test_verifying_key_serde_json_roundtrip() {
-            let kp = KeyPair::<XmssSha2_10_256>::generate(&mut rand::rng()).unwrap();
+            let kp = xmss_test_keypair();
             let pk = kp.verifying_key();
 
             let json = serde_json::to_string(pk).unwrap();
-            let pk2: VerifyingKey<XmssSha2_10_256> = serde_json::from_str(&json).unwrap();
+            let pk2: VerifyingKey<TestParams> = serde_json::from_str(&json).unwrap();
             assert_eq!(*pk, pk2);
         }
 
         #[test]
         fn test_signature_serde_json_roundtrip() {
-            let mut kp = KeyPair::<XmssSha2_10_256>::generate(&mut rand::rng()).unwrap();
+            let mut kp = xmss_test_keypair();
             let sig = kp.signing_key().sign(b"test message").unwrap();
 
             let json = serde_json::to_string(&sig).unwrap();
-            let sig2: Signature<XmssSha2_10_256> = serde_json::from_str(&json).unwrap();
+            let sig2: Signature<TestParams> = serde_json::from_str(&json).unwrap();
             assert_eq!(sig, sig2);
         }
 
         #[test]
         fn test_signing_key_postcard_roundtrip() {
-            let mut kp = KeyPair::<XmssSha2_10_256>::generate(&mut rand::rng()).unwrap();
+            let mut kp = xmss_test_keypair();
             let sk = kp.signing_key();
 
             let bytes = postcard::to_allocvec(&*sk).unwrap();
-            let sk2: SigningKey<XmssSha2_10_256> = postcard::from_bytes(&bytes).unwrap();
+            let sk2: SigningKey<TestParams> = postcard::from_bytes(&bytes).unwrap();
             assert_eq!(*sk, sk2);
         }
 
         #[test]
         fn test_verifying_key_postcard_roundtrip() {
-            let kp = KeyPair::<XmssSha2_10_256>::generate(&mut rand::rng()).unwrap();
+            let kp = xmss_test_keypair();
             let pk = kp.verifying_key();
 
             let bytes = postcard::to_allocvec(pk).unwrap();
-            let pk2: VerifyingKey<XmssSha2_10_256> = postcard::from_bytes(&bytes).unwrap();
+            let pk2: VerifyingKey<TestParams> = postcard::from_bytes(&bytes).unwrap();
             assert_eq!(*pk, pk2);
         }
 
         #[test]
         fn test_signature_postcard_roundtrip() {
-            let mut kp = KeyPair::<XmssSha2_10_256>::generate(&mut rand::rng()).unwrap();
+            let mut kp = xmss_test_keypair();
             let sig = kp.signing_key().sign(b"test message").unwrap();
 
             let bytes = postcard::to_allocvec(&sig).unwrap();
-            let sig2: Signature<XmssSha2_10_256> = postcard::from_bytes(&bytes).unwrap();
+            let sig2: Signature<TestParams> = postcard::from_bytes(&bytes).unwrap();
             assert_eq!(sig, sig2);
         }
     }
@@ -431,11 +626,28 @@ mod tests {
 
         #[test]
         fn test_pkcs8_roundtrip() {
-            let kp = KeyPair::<XmssSha2_10_256>::generate(&mut rand::rng()).unwrap();
+            let kp = xmss_test_keypair();
             let der = kp.to_pkcs8_der().expect("PKCS#8 encode failed");
-            let kp2 = KeyPair::<XmssSha2_10_256>::from_pkcs8_der(der.as_bytes())
+            let kp2 = KeyPair::<TestParams>::from_pkcs8_der(der.as_bytes())
                 .expect("PKCS#8 decode failed");
             assert_eq!(kp.verifying_key(), kp2.verifying_key());
+        }
+
+        #[test]
+        fn test_pkcs8_rejects_mismatched_public_key() {
+            let kp = xmss_test_keypair();
+            let der = kp.to_pkcs8_der().expect("PKCS#8 encode failed");
+            let mut bytes = der.as_bytes().to_vec();
+
+            // The optional public-key BIT STRING is the final PKCS#8 field, so
+            // changing its last data byte preserves valid DER while making it
+            // inconsistent with the private key.
+            *bytes.last_mut().expect("PKCS#8 encoding was empty") ^= 1;
+
+            assert!(matches!(
+                KeyPair::<TestParams>::from_pkcs8_der(&bytes),
+                Err(Error::PublicKeyMismatch)
+            ));
         }
     }
 }

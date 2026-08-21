@@ -4,7 +4,7 @@ use crate::hash_address::{set_chain_addr, set_hash_addr, set_key_and_mask};
 use crate::params::XmssParams;
 use crate::utils::ull_to_bytes;
 
-/// Expands an n-byte seed into a wots_len*n byte array using prf_keygen.
+/// Expands an `n`-byte seed into a `wots_len * n`-byte array using `prf_keygen`.
 fn expand_seed(
     params: &XmssParams,
     outseeds: &mut [u8],
@@ -33,7 +33,7 @@ fn expand_seed(
 }
 
 /// Computes the chaining function.
-/// Interprets `input` as start-th value of the chain.
+/// Interprets `input` as the value at position `start` in the chain.
 fn gen_chain(
     params: &XmssParams,
     out: &mut [u8],
@@ -58,8 +58,8 @@ fn gen_chain(
     Ok(())
 }
 
-/// base_w algorithm as described in draft.
-/// Interprets an array of bytes as integers in base w.
+/// Implements the `base_w` algorithm described in the specification.
+/// Interprets an array of bytes as integers in base `w`.
 fn base_w(params: &XmssParams, output: &mut [u32], input: &[u8]) {
     let out_len = output.len();
     let mut in_idx = 0;
@@ -80,7 +80,7 @@ fn base_w(params: &XmssParams, output: &mut [u32], input: &[u8]) {
     }
 }
 
-/// Computes the WOTS+ checksum over a message (in base_w).
+/// Computes the WOTS+ checksum over a message in base `w`.
 fn wots_checksum(params: &XmssParams, csum_base_w: &mut [u32], msg_base_w: &[u32]) {
     let mut csum: u32 = 0;
 
@@ -103,8 +103,8 @@ fn chain_lengths(params: &XmssParams, lengths: &mut [u32], msg: &[u8]) {
     wots_checksum(params, csum_part, msg_part);
 }
 
-/// WOTS key generation. Takes a 32 byte seed for the private key, expands it to
-/// a full WOTS private key and computes the corresponding public key.
+/// Generates a WOTS key. Expands a 32-byte private-key seed into a full WOTS
+/// private key and computes the corresponding public key.
 pub fn wots_pkgen(
     params: &XmssParams,
     pk: &mut [u8],
@@ -134,8 +134,8 @@ pub fn wots_pkgen(
     Ok(())
 }
 
-/// Takes a n-byte message and the 32-byte seed for the private key to compute a
-/// signature that is placed at 'sig'.
+/// Computes a signature from an `n`-byte message and a 32-byte private-key seed,
+/// then writes it to `sig`.
 pub fn wots_sign(
     params: &XmssParams,
     sig: &mut [u8],
@@ -169,7 +169,7 @@ pub fn wots_sign(
     Ok(())
 }
 
-/// Takes a WOTS signature and an n-byte message, computes a WOTS public key.
+/// Computes a WOTS public key from a WOTS signature and an `n`-byte message.
 pub fn wots_pk_from_sig(
     params: &XmssParams,
     pk: &mut [u8],

@@ -1,4 +1,6 @@
 use core::fmt;
+#[cfg(feature = "extra-depths")]
+use core::marker::PhantomData;
 use core::str::FromStr;
 
 use hybrid_array::ArraySize;
@@ -25,7 +27,7 @@ pub(crate) const XMSS_OID_LEN: usize = 4;
 /// Trait defining an XMSS or XMSSMT parameter set at compile time.
 #[allow(private_interfaces)]
 pub trait XmssParameter: Sized + Clone + fmt::Debug + Default + 'static {
-    /// Hash output length (U24, U32, or U64).
+    /// Hash output length (`U24`, `U32`, or `U64`).
     type N: ArraySize + fmt::Debug + Clone + PartialEq + Eq;
     /// Signing key length as a type-level unsigned integer.
     type SkLen: ArraySize + fmt::Debug + Clone + PartialEq + Eq;
@@ -34,7 +36,7 @@ pub trait XmssParameter: Sized + Clone + fmt::Debug + Default + 'static {
     /// Seed length as a type-level unsigned integer.
     type SeedLen: ArraySize + fmt::Debug + Clone + PartialEq + Eq;
 
-    /// Human-readable name, e.g. "XMSS-SHA2_10_256".
+    /// Human-readable name, for example, `XMSS-SHA2_10_256`.
     const NAME: &'static str;
 
     /// Signing key length in bytes (including OID prefix).
@@ -43,18 +45,44 @@ pub trait XmssParameter: Sized + Clone + fmt::Debug + Default + 'static {
     const VK_LEN: usize;
     /// Detached signature length in bytes.
     const SIG_LEN: usize;
-    /// Seed length in bytes (3*N).
+    /// Seed length in bytes (`3 * N`).
     const SEED_LEN: usize;
-
-    /// The internal XmssOid for this parameter set.
+    /// Parameter-set identifier stored at the start of serialized keys.
     #[doc(hidden)]
-    fn oid() -> XmssOid;
-    /// Build the runtime XmssParams for internal computation.
+    const OID: u32;
+    /// Whether this is a single-tree XMSS parameter set.
+    #[doc(hidden)]
+    const IS_XMSS: bool;
+
+    /// Builds the runtime `XmssParams` for internal computation.
     #[doc(hidden)]
     fn xmss_params() -> XmssParams;
+
+    /// Allocates key buffers and writes this parameter set's identifier.
+    #[doc(hidden)]
+    fn init_keypair_buffers(seed: Option<&[u8]>) -> XmssResult<(XmssParams, Vec<u8>, Vec<u8>)> {
+        let params = Self::xmss_params();
+        let expected = params.get_seed_length();
+        if let Some(seed) = seed {
+            if seed.len() != expected {
+                return Err(Error::InvalidSeedLength {
+                    expected,
+                    got: seed.len(),
+                });
+            }
+        }
+
+        let mut pk = vec![0u8; Self::VK_LEN];
+        let mut sk = vec![0u8; Self::SK_LEN];
+        let oid = Self::OID.to_be_bytes();
+        pk[..XMSS_OID_LEN].copy_from_slice(&oid);
+        sk[..XMSS_OID_LEN].copy_from_slice(&oid);
+
+        Ok((params, pk, sk))
+    }
 }
 
-// Const helper functions used by the macro to compute sizes from (n, h, d).
+// Constant helper functions used by the macro to compute sizes from (n, h, d).
 
 const fn xmss_sk_len(n: usize, h: usize, d: usize) -> usize {
     let index_bytes = if d == 1 { 4 } else { h.div_ceil(8) };
@@ -94,10 +122,8 @@ macro_rules! define_xmss_parameter {
             const VK_LEN: usize = xmss_vk_len($n);
             const SIG_LEN: usize = xmss_sig_len($n, $h, $d);
             const SEED_LEN: usize = xmss_seed_len($n);
-
-            fn oid() -> XmssOid {
-                $oid
-            }
+            const OID: u32 = $oid.raw_oid();
+            const IS_XMSS: bool = $d == 1;
 
             #[allow(clippy::unwrap_used)]
             fn xmss_params() -> XmssParams {
@@ -109,7 +135,7 @@ macro_rules! define_xmss_parameter {
     };
 }
 
-// ---- XMSS single-tree parameter sets (d=1) ----
+// ---- XMSS single-tree parameter sets (d = 1) ----
 define_xmss_parameter!(
     XmssSha2_10_256,
     "XMSS-SHA2_10_256",
@@ -321,8 +347,208 @@ define_xmss_parameter!(
     d = 1
 );
 
+// ---- Non-standard XMSS single-tree depths ----
+
+/// A curated non-standard XMSS tree depth.
+///
+/// Implementations of this sealed trait are available only with the
+/// `extra-depths` feature. The selected height supports `2^HEIGHT` signatures.
+#[cfg(feature = "extra-depths")]
+pub trait XmssTreeDepth:
+    extra_depth_sealed::Sealed + Clone + fmt::Debug + Default + PartialEq + Eq + 'static
+{
+    /// Merkle tree height.
+    const HEIGHT: u32;
+    /// Maximum number of signatures that a key pair can produce.
+    const MAX_SIGNATURES: u32 = 1 << Self::HEIGHT;
+}
+
+#[cfg(feature = "extra-depths")]
+mod extra_depth_sealed {
+    pub trait Sealed {}
+}
+
+#[cfg(feature = "extra-depths")]
+macro_rules! define_extra_depths {
+    ($($(#[$doc:meta])* $name:ident = $height:literal),+ $(,)?) => {
+        $(
+            $(#[$doc])*
+            #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+            pub struct $name;
+
+            impl extra_depth_sealed::Sealed for $name {}
+
+            impl XmssTreeDepth for $name {
+                const HEIGHT: u32 = $height;
+            }
+        )+
+    };
+}
+
+#[cfg(feature = "extra-depths")]
+define_extra_depths!(
+    /// Height 1: 2 signatures per key pair.
+    H1 = 1,
+    /// Height 2: 4 signatures per key pair.
+    H2 = 2,
+    /// Height 3: 8 signatures per key pair.
+    H3 = 3,
+    /// Height 4: 16 signatures per key pair.
+    H4 = 4,
+    /// Height 5: 32 signatures per key pair.
+    H5 = 5,
+    /// Height 6: 64 signatures per key pair.
+    H6 = 6,
+    /// Height 7: 128 signatures per key pair.
+    H7 = 7,
+    /// Height 8: 256 signatures per key pair.
+    H8 = 8,
+    /// Height 9: 512 signatures per key pair.
+    H9 = 9,
+    /// Height 11: 2,048 signatures per key pair.
+    H11 = 11,
+    /// Height 12: 4,096 signatures per key pair.
+    H12 = 12,
+    /// Height 13: 8,192 signatures per key pair.
+    H13 = 13,
+    /// Height 14: 16,384 signatures per key pair.
+    H14 = 14,
+    /// Height 15: 32,768 signatures per key pair.
+    H15 = 15,
+    /// Height 17: 131,072 signatures per key pair.
+    H17 = 17,
+    /// Height 18: 262,144 signatures per key pair.
+    H18 = 18,
+    /// Height 19: 524,288 signatures per key pair.
+    H19 = 19,
+    /// Height 21: 2,097,152 signatures per key pair.
+    H21 = 21,
+    /// Height 22: 4,194,304 signatures per key pair.
+    H22 = 22,
+    /// Height 23: 8,388,608 signatures per key pair.
+    H23 = 23,
+    /// Height 24: 16,777,216 signatures per key pair.
+    H24 = 24,
+);
+
+/// Private-use prefix for non-standard single-tree parameter identifiers.
+///
+/// Layout: `0xff | family | 0x00 | height`. These values deliberately cannot
+/// be mistaken for an RFC 8391 or NIST SP 800-208 parameter-set identifier.
+#[cfg(feature = "extra-depths")]
+const EXTRA_DEPTH_OID_PREFIX: u32 = 0xff00_0000;
+
+#[cfg(feature = "extra-depths")]
+const fn extra_depth_oid(family: u32, height: u32) -> u32 {
+    EXTRA_DEPTH_OID_PREFIX | (family << 16) | height
+}
+
+#[cfg(feature = "extra-depths")]
+fn extra_xmss_params(func: u32, n: u32, padding_len: u32, height: u32) -> XmssParams {
+    let wots_len = 2 * n + 3;
+    XmssParams {
+        func,
+        n,
+        padding_len,
+        wots_w: 16,
+        wots_log_w: 4,
+        wots_len1: 2 * n,
+        wots_len2: 3,
+        wots_len,
+        wots_sig_bytes: wots_len * n,
+        full_height: height,
+        tree_height: height,
+        d: 1,
+        index_bytes: 4,
+        sig_bytes: 4 + n + wots_len * n + height * n,
+        pk_bytes: 2 * n,
+        sk_bytes: u64::from(4 + 4 * n),
+        bds_k: 0,
+    }
+}
+
+#[cfg(feature = "extra-depths")]
+macro_rules! define_extra_xmss_family {
+    ($name:ident, $display:literal, $family:literal, $func:expr, $n_type:ty, $n:literal, $padding:literal) => {
+        #[doc = concat!("Non-standard ", $display, " XMSS parameter set with a curated tree depth.")]
+        #[doc = ""]
+        #[doc = concat!("Combine `", stringify!($name), "` with one of the 21 types implementing [`XmssTreeDepth`].")]
+        #[doc = "See the crate-level **Extra tree depths** guide for the complete list and examples."]
+        #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+        #[allow(non_camel_case_types)]
+        pub struct $name<D: XmssTreeDepth>(PhantomData<D>);
+
+        #[allow(private_interfaces)]
+        impl<D: XmssTreeDepth> XmssParameter for $name<D> {
+            type N = $n_type;
+            type SkLen = TSum<TSum<U4, U4>, TProd<$n_type, U4>>;
+            type VkLen = TSum<U4, TProd<$n_type, U2>>;
+            type SeedLen = TProd<$n_type, U3>;
+
+            const NAME: &'static str = concat!($display, " with extra depth");
+            const SK_LEN: usize = xmss_sk_len($n, D::HEIGHT as usize, 1);
+            const VK_LEN: usize = xmss_vk_len($n);
+            const SIG_LEN: usize = xmss_sig_len($n, D::HEIGHT as usize, 1);
+            const SEED_LEN: usize = xmss_seed_len($n);
+            const OID: u32 = extra_depth_oid($family, D::HEIGHT);
+            const IS_XMSS: bool = true;
+
+            fn xmss_params() -> XmssParams {
+                extra_xmss_params($func, $n, $padding, D::HEIGHT)
+            }
+        }
+    };
+}
+
+#[cfg(feature = "extra-depths")]
+define_extra_xmss_family!(XmssSha2_256, "XMSS-SHA2-256", 1, XMSS_SHA2, U32, 32, 32);
+#[cfg(feature = "extra-depths")]
+define_extra_xmss_family!(XmssSha2_512, "XMSS-SHA2-512", 2, XMSS_SHA2, U64, 64, 64);
+#[cfg(feature = "extra-depths")]
+define_extra_xmss_family!(
+    XmssShake_256,
+    "XMSS-SHAKE-256",
+    3,
+    XMSS_SHAKE128,
+    U32,
+    32,
+    32
+);
+#[cfg(feature = "extra-depths")]
+define_extra_xmss_family!(
+    XmssShake_512,
+    "XMSS-SHAKE-512",
+    4,
+    XMSS_SHAKE256,
+    U64,
+    64,
+    64
+);
+#[cfg(feature = "extra-depths")]
+define_extra_xmss_family!(XmssSha2_192, "XMSS-SHA2-192", 5, XMSS_SHA2, U24, 24, 4);
+#[cfg(feature = "extra-depths")]
+define_extra_xmss_family!(
+    XmssShake256_256,
+    "XMSS-SHAKE256-256",
+    6,
+    XMSS_SHAKE256,
+    U32,
+    32,
+    32
+);
+#[cfg(feature = "extra-depths")]
+define_extra_xmss_family!(
+    XmssShake256_192,
+    "XMSS-SHAKE256-192",
+    7,
+    XMSS_SHAKE256,
+    U24,
+    24,
+    4
+);
+
 // ---- XMSSMT multi-tree parameter sets ----
-// SHA2, n=32
+// SHA-2, n = 32
 define_xmss_parameter!(
     XmssMtSha2_20_2_256,
     "XMSSMT-SHA2_20/2_256",
@@ -403,7 +629,7 @@ define_xmss_parameter!(
     h = 60,
     d = 12
 );
-// SHA2, n=64
+// SHA-2, n = 64
 define_xmss_parameter!(
     XmssMtSha2_20_2_512,
     "XMSSMT-SHA2_20/2_512",
@@ -484,7 +710,7 @@ define_xmss_parameter!(
     h = 60,
     d = 12
 );
-// SHAKE, n=32
+// SHAKE, n = 32
 define_xmss_parameter!(
     XmssMtShake_20_2_256,
     "XMSSMT-SHAKE_20/2_256",
@@ -565,7 +791,7 @@ define_xmss_parameter!(
     h = 60,
     d = 12
 );
-// SHAKE, n=64
+// SHAKE, n = 64
 define_xmss_parameter!(
     XmssMtShake_20_2_512,
     "XMSSMT-SHAKE_20/2_512",
@@ -646,7 +872,7 @@ define_xmss_parameter!(
     h = 60,
     d = 12
 );
-// SHA2, n=24
+// SHA-2, n = 24
 define_xmss_parameter!(
     XmssMtSha2_20_2_192,
     "XMSSMT-SHA2_20/2_192",
@@ -727,7 +953,7 @@ define_xmss_parameter!(
     h = 60,
     d = 12
 );
-// SHAKE256, n=32
+// SHAKE256, n = 32
 define_xmss_parameter!(
     XmssMtShake256_20_2_256,
     "XMSSMT-SHAKE256_20/2_256",
@@ -808,7 +1034,7 @@ define_xmss_parameter!(
     h = 60,
     d = 12
 );
-// SHAKE256, n=24
+// SHAKE256, n = 24
 define_xmss_parameter!(
     XmssMtShake256_20_2_192,
     "XMSSMT-SHAKE256_20/2_192",
@@ -891,7 +1117,7 @@ define_xmss_parameter!(
 );
 
 /// Offset added to XMSSMT raw OID values to produce unique discriminants.
-/// XMSS OIDs use 0x0000_XXXX, XMSSMT OIDs use 0x0001_XXXX.
+/// XMSS OIDs use `0x0000_XXXX`; XMSSMT OIDs use `0x0001_XXXX`.
 const XMSSMT_OID_OFFSET: u32 = 0x0001_0000;
 
 /// XMSS parameter set derived from an OID.
@@ -928,7 +1154,7 @@ impl XmssParams {
 #[repr(u32)]
 #[allow(non_camel_case_types, missing_docs)]
 pub(crate) enum XmssOid {
-    // ---- XMSS (single-tree, d=1) ----
+    // ---- XMSS (single-tree, d = 1) ----
     XmssSha2_10_256 = 0x0000_0001,
     XmssSha2_16_256 = 0x0000_0002,
     XmssSha2_20_256 = 0x0000_0003,
@@ -952,7 +1178,7 @@ pub(crate) enum XmssOid {
     XmssShake256_16_192 = 0x0000_0014,
     XmssShake256_20_192 = 0x0000_0015,
 
-    // ---- XMSSMT (multi-tree, d>1) ----
+    // ---- XMSSMT (multi-tree, d > 1) ----
     XmssMtSha2_20_2_256 = XMSSMT_OID_OFFSET | 0x01,
     XmssMtSha2_20_4_256 = XMSSMT_OID_OFFSET | 0x02,
     XmssMtSha2_40_2_256 = XMSSMT_OID_OFFSET | 0x03,
@@ -1017,22 +1243,14 @@ impl XmssOid {
         (self as u32) < XMSSMT_OID_OFFSET
     }
 
-    /// Returns the raw OID value as used in the wire format (key serialization).
-    pub(crate) fn raw_oid(self) -> u32 {
+    /// Returns the raw OID value used in the serialized key format.
+    pub(crate) const fn raw_oid(self) -> u32 {
         let v = self as u32;
         if v >= XMSSMT_OID_OFFSET {
             v - XMSSMT_OID_OFFSET
         } else {
             v
         }
-    }
-
-    /// Constructs an `XmssOid` from a raw XMSSMT OID value (as stored in keys).
-    pub(crate) fn from_xmssmt_raw_oid(oid: u32) -> XmssResult<Self> {
-        Self::try_from(
-            oid.checked_add(XMSSMT_OID_OFFSET)
-                .ok_or(Error::InvalidOid(oid))?,
-        )
     }
 
     /// Initializes the given `XmssParams` structure with all parameters
@@ -1122,7 +1340,7 @@ impl XmssOid {
         params.wots_w = 16;
         params.bds_k = 0;
 
-        // Compute derived parameters
+        // Compute derived parameters.
         params.tree_height = params.full_height / params.d;
 
         match params.wots_w {
@@ -1162,39 +1380,6 @@ impl XmssOid {
         params.sk_bytes = xmss_xmssmt_core_sk_bytes(params);
 
         Ok(())
-    }
-
-    /// Allocates and initializes pk/sk buffers with the OID prefix written.
-    pub(crate) fn init_keypair_buffers(
-        &self,
-        seed: Option<&[u8]>,
-    ) -> XmssResult<(XmssParams, Vec<u8>, Vec<u8>)> {
-        let mut params = XmssParams::default();
-        self.initialize(&mut params)?;
-
-        let expected = params.get_seed_length();
-        if let Some(seed) = seed {
-            if seed.len() != expected {
-                return Err(Error::InvalidSeedLength {
-                    expected,
-                    got: seed.len(),
-                });
-            }
-        }
-
-        let oid = self.raw_oid();
-
-        let mut pk = vec![0u8; XMSS_OID_LEN + params.pk_bytes as usize];
-        #[allow(clippy::cast_possible_truncation)]
-        let sk_len = XMSS_OID_LEN + params.sk_bytes as usize;
-        let mut sk = vec![0u8; sk_len];
-
-        for i in 0..XMSS_OID_LEN {
-            pk[XMSS_OID_LEN - i - 1] = ((oid >> (8 * i)) & 0xFF) as u8;
-            sk[XMSS_OID_LEN - i - 1] = ((oid >> (8 * i)) & 0xFF) as u8;
-        }
-
-        Ok((params, pk, sk))
     }
 }
 

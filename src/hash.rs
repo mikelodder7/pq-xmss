@@ -61,7 +61,7 @@ fn core_hash(params: &XmssParams, out: &mut [u8], input: &[u8]) -> XmssResult<()
     Ok(())
 }
 
-/// Computes PRF(key, in), for a key of params.n bytes, and a 32-byte input.
+/// Computes `PRF(key, input)` for a key of `params.n` bytes and a 32-byte input.
 pub(crate) fn prf(
     params: &XmssParams,
     out: &mut [u8],
@@ -82,8 +82,8 @@ pub(crate) fn prf(
     result
 }
 
-/// Computes PRF_keygen(key, in), for a key of params.n bytes,
-/// and an input of 32 + params.n bytes.
+/// Computes `PRF_keygen(key, input)` for a key of `params.n` bytes and an input
+/// of `32 + params.n` bytes.
 pub(crate) fn prf_keygen(
     params: &XmssParams,
     out: &mut [u8],
@@ -131,7 +131,7 @@ pub(crate) fn hash_message(
     core_hash(params, out, &m_with_prefix[..total_len])
 }
 
-/// Tree hash function for internal nodes (two n-byte inputs).
+/// Computes the tree hash for internal nodes from two `n`-byte inputs.
 pub(crate) fn thash_h(
     params: &XmssParams,
     out: &mut [u8],
@@ -172,7 +172,7 @@ pub(crate) fn thash_h(
     core_hash(params, out, &buf)
 }
 
-/// Tree hash function for WOTS chains (single n-byte input).
+/// Computes the tree hash for WOTS chains from a single `n`-byte input.
 pub(crate) fn thash_f(
     params: &XmssParams,
     out: &mut [u8],
