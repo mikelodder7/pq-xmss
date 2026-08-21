@@ -1,6 +1,60 @@
 //! XMSS (eXtended Merkle Signature Scheme) implementation in Rust.
 //!
 //! Implements the XMSS and XMSS^MT hash-based signature schemes from RFC 8391.
+//!
+//! # Examples
+//!
+//! ## Sign and verify with XMSS
+//!
+//! XMSS uses one Merkle tree and provides smaller signatures than XMSS^MT. A
+//! signing key is stateful: each successful signing operation advances its
+//! one-time index.
+//!
+//! ```rust
+//! use pq_xmss::{KeyPair, XmssSha2_10_256};
+//!
+//! let mut keypair = KeyPair::<XmssSha2_10_256>::generate(&mut rand::rng())?;
+//! let message = b"release manifest";
+//! let state_before = keypair.signing_key().as_ref().to_vec();
+//!
+//! let signature = keypair.signing_key().sign_detached(message)?;
+//! keypair
+//!     .verifying_key()
+//!     .verify_detached(&signature, message)?;
+//!
+//! // Signing advanced the compact, authoritative key state.
+//! assert_ne!(state_before, keypair.signing_key().as_ref());
+//! # Ok::<(), pq_xmss::Error>(())
+//! ```
+//!
+//! ## Persist and resume an XMSS^MT key
+//!
+//! XMSS^MT divides its total height among several smaller trees. This permits
+//! much larger signing capacities and faster key generation at the cost of
+//! larger signatures. Persist the advanced compact state atomically before
+//! distributing or otherwise relying on a signature.
+//!
+//! ```rust
+//! use pq_xmss::{KeyPair, SigningKey, XmssMtSha2_20_2_256};
+//!
+//! type Params = XmssMtSha2_20_2_256;
+//! let mut keypair = KeyPair::<Params>::generate(&mut rand::rng())?;
+//! let verifying_key = keypair.verifying_key().clone();
+//!
+//! let first = keypair.signing_key().sign_detached(b"first approval")?;
+//! let persisted_state = keypair.signing_key().as_ref().to_vec();
+//! // Atomically replace the previously stored state with `persisted_state`
+//! // before making `first` externally visible.
+//! verifying_key.verify_detached(&first, b"first approval")?;
+//!
+//! // After a restart, reconstruct the in-memory traversal cache from the
+//! // compact state. Do not retain or use the older SigningKey concurrently.
+//! drop(keypair);
+//! let mut resumed = SigningKey::<Params>::try_from(persisted_state.as_slice())?;
+//! let second = resumed.sign_detached(b"second approval")?;
+//! verifying_key.verify_detached(&second, b"second approval")?;
+//! # Ok::<(), pq_xmss::Error>(())
+//! ```
 #![doc = include_str!("../docs/extra-depths.md")]
 
 mod error;

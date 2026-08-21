@@ -2,11 +2,12 @@
 
 The `extra-depths` Cargo feature adds non-standard, single-tree XMSS parameter
 sets for applications that need a signature capacity not offered by the
-standardized tree heights. Enable it in `Cargo.toml`:
+standardized tree heights. This does not impact the security as XMSS security is
+a function of the hash used and not its height.
 
 ```toml
 [dependencies]
-pq-xmss = { version = "0.1", features = ["extra-depths"] }
+pq-xmss = { version = "*", features = ["extra-depths"] }
 ```
 
 Each parameter set combines a generic parameter family, which selects a hash
@@ -130,10 +131,10 @@ to restart signing from index zero after any signatures have been issued.
 ## Example: save and resume signing state
 
 XMSS is stateful. Every signing call updates the key in memory. If the key will
-be used after a restart, persist its updated compact bytes and replace the
+be used after a restart, persist it and replace the
 previous state atomically before relying on the signature. Restoring an older
-copy can reuse a one-time key and compromise security. The caller may use a
-keychain, file, database, or another persistence mechanism. An exhausted key
+copy can reuse a one-time key and compromise security. If any index is reused,
+the entire `SigningKey` is considered compromised. An exhausted key
 can instead be removed without persisting its exhausted state.
 
 ```rust

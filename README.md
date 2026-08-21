@@ -66,12 +66,15 @@ fn main() -> Result<(), pq_xmss::Error> {
 ## State Management
 
 Every signing call advances the key held in memory, so subsequent calls on the
-same `SigningKey` do not reuse a one-time index. Authentication-path traversal
-data is cached only in memory; serialization, PKCS#8, and `AsRef<[u8]>` retain
+same `SigningKey` do not reuse a one-time index. XMSS requires authentication-path
+traversal data, for performance this is cached only in memory; 
+serialization, PKCS#8, and `AsRef<[u8]>` retain
 the existing compact key format. Decoding that compact form reconstructs the
 cache for its stored index once; subsequent signatures update it incrementally.
+This pays the penalty once when loading `SigningKey`, but greatly enhances
+signing time.
 
-The caller chooses how to persist that compact state, such as a keychain, file,
+The caller chooses how to persist, such as a keychain, file,
 or database. If the key will be used after a restart, replace the stored state
 atomically before relying on the signature. If all indices have been consumed,
 the exhausted key can instead be removed from storage. The caller must also
@@ -130,7 +133,7 @@ full BDS implementation.
 | `XmssShake256_20_192` | SHAKE256 | 24 | 20 | 1,048,576 |
 
 With the `extra-depths` feature, every single-tree combination of hash function
-and output size also supports 21 curated heights between 1 and 24. See the
+and output size also supports 21 additional curated heights between 1 and 24. See the
 [extra tree depths guide](docs/extra-depths.md) for every depth and family,
 size formulas, interoperability and state-management guidance, and three
 runnable examples.
@@ -147,6 +150,31 @@ functions.
 
 See the [API documentation][docs-link] for a complete list of all 72 XMSS^MT
 parameter sets.
+
+#### Choosing XMSS or XMSS^MT
+
+Use XMSS when smaller signatures, faster verification, and a simpler tree
+structure matter most. Its single tree is a good fit when the required signing
+capacity is modest and generating the selected tree height is affordable. For
+example, `XmssSha2_10_256` permits 1,024 signatures from one key.
+
+Use XMSS^MT when a key needs a much larger signing capacity or when generating
+a single tree at the desired total height would be impractical. XMSS^MT divides
+the total height across several smaller trees, making key generation much
+faster for the same total height. The tradeoff is a larger signature and more
+verification work because the signature contains one WOTS+ signature per
+layer. For SHA2-256, an XMSS height-20 signature is approximately 2,820 bytes,
+compared with 4,963 bytes for XMSS^MT 20/2 and 9,251 bytes for XMSS^MT 20/4.
+
+As a practical starting point, use `XmssSha2_10_256` for up to 1,024 compact
+signatures and `XmssMtSha2_20_2_256` for a long-lived key with up to 2^20
+signatures. Height-40 and height-60 XMSS^MT parameter sets are best reserved for
+applications that genuinely require their enormous capacities. XMSS^MT does
+not inherently provide greater cryptographic security than XMSS with the same
+hash function and output size; its principal advantages are capacity and key
+generation performance. Both variants require the same careful, persistent
+state management. [RFC 8391] similarly recommends considering XMSS^MT when
+more signatures or faster key generation are required.
 
 ## Features
 
