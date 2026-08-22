@@ -282,19 +282,6 @@ It reports key generation, compact-key decoding, warm sequential signing, and
 decoding before every signature. The last comparison measures the effect of
 retaining traversal state in memory.
 
-A representative release-mode run produced the following average times per
-operation. Results vary by machine, so run the benchmark when choosing a
-parameter set.
-
-| Parameter set | Generate | Decode | Warm sign | Reload + sign | Speedup |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| XMSS SHA2 H8 | 122.2 ms | 128.6 ms | 2.23 ms | 124.0 ms | 55.7× |
-| XMSS SHA2 H10 | 503.5 ms | 504.8 ms | 1.93 ms | 496.1 ms | 256.5× |
-| XMSSMT SHA2 20/2 | 1,002.0 ms | 1,001.5 ms | 1.47 ms | 1,005.1 ms | 686.0× |
-
-“Reload + sign” deliberately decodes the updated compact key before every
-signature, approximating the previous full-tree-per-signature behavior.
-
 ## Minimum Supported Rust Version
 
 This crate uses Rust 2024 edition and requires **Rust 1.85 or newer**.
