@@ -1,3 +1,4 @@
+use alloc::{boxed::Box, vec::Vec};
 use core::marker::PhantomData;
 
 use hybrid_array::Array;
@@ -50,7 +51,7 @@ fn parse_oid(bytes: &[u8]) -> XmssResult<u32> {
 pub struct SigningKey<P: XmssParameter> {
     bytes: Array<u8, P::SkLen>,
     params: XmssParams,
-    traversal: xmss_core::TraversalState,
+    traversal: xmss_core::TraversalState<P::N>,
     _marker: PhantomData<P>,
 }
 
@@ -193,7 +194,7 @@ impl<P: XmssParameter> SigningKey<P> {
     pub(crate) fn new(
         bytes: Array<u8, P::SkLen>,
         params: XmssParams,
-        traversal: xmss_core::TraversalState,
+        traversal: xmss_core::TraversalState<P::N>,
     ) -> Self {
         Self {
             bytes,
@@ -207,7 +208,8 @@ impl<P: XmssParameter> SigningKey<P> {
     ///
     /// The in-memory one-time key index and traversal state are advanced before
     /// this method returns. Persistence of the updated compact key is the
-    /// caller's responsibility.
+    /// caller's responsibility. The borrowed message is hashed without first
+    /// constructing a temporary signature-and-message buffer.
     pub fn sign(&mut self, m: &[u8]) -> XmssResult<Signature<P>> {
         xmss_core::xmssmt_core_sign(
             &self.params,
@@ -225,18 +227,17 @@ impl<P: XmssParameter> SigningKey<P> {
     ///
     /// The in-memory one-time key index and traversal state are advanced before
     /// this method returns. Persistence of the updated compact key is the
-    /// caller's responsibility.
+    /// caller's responsibility. The borrowed message is hashed without first
+    /// constructing a temporary signature-and-message buffer.
     pub fn sign_detached(&mut self, m: &[u8]) -> XmssResult<DetachedSignature<P>> {
-        let mut sm = xmss_core::xmssmt_core_sign(
+        let signature = xmss_core::xmssmt_core_sign_detached(
             &self.params,
             &mut self.bytes[XMSS_OID_LEN..],
             &mut self.traversal,
             m,
         )?;
-        let sig_bytes = sm.len() - m.len();
-        sm.truncate(sig_bytes);
         Ok(DetachedSignature {
-            bytes: sm.into_boxed_slice(),
+            bytes: signature.into_boxed_slice(),
             _marker: PhantomData,
         })
     }
@@ -382,19 +383,15 @@ impl<P: XmssParameter> VerifyingKey<P> {
         Ok(m)
     }
 
-    /// Verifies a detached signature against the provided message.
+    /// Verifies a detached signature against the provided message without
+    /// concatenating them into a temporary buffer.
     pub fn verify_detached(&self, signature: &DetachedSignature<P>, m: &[u8]) -> XmssResult<()> {
-        let mut sm = Vec::with_capacity(signature.bytes.len() + m.len());
-        sm.extend_from_slice(&signature.bytes);
-        sm.extend_from_slice(m);
-        let mut msg = Vec::new();
-        xmss_commons::xmssmt_core_sign_open(
+        xmss_commons::xmssmt_core_verify_detached(
             &self.params,
-            &mut msg,
-            &sm,
+            &signature.bytes,
+            m,
             &self.bytes[XMSS_OID_LEN..],
-        )?;
-        Ok(())
+        )
     }
 }
 
@@ -687,6 +684,10 @@ impl<P: XmssParameter> KeyPair<P> {
 
     /// Generates a key pair from a deterministic seed.
     /// The seed must be `P::SEED_LEN` bytes (`3 * n`).
+    ///
+    /// A seed recreates the initial index-zero state; it must not be used to
+    /// restore a key after signatures have been issued. Restore the advanced
+    /// compact bytes by decoding them into a new [`SigningKey`] instead.
     pub fn from_seed(seed: &[u8]) -> XmssResult<Self> {
         let (params, mut pk, mut sk) = P::init_keypair_buffers(Some(seed))?;
         let traversal = xmss_core::xmssmt_core_seed_keypair(

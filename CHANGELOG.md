@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.1.0] - 2026-08-21
+## [0.1.0] - 2026-08-22
 
 ### Added
 
@@ -19,6 +19,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A dependency-free benchmark comparing warm signing with compact-key
   reconstruction before every signature.
 - The initial `pq-xmss` release.
+- `no_std` support on targets with an allocator through the `alloc` feature.
+- A `FixedDigest` abstraction with type-level 24-, 32-, and 64-byte XMSS
+  outputs.
+- Alloc-backed runtime parameter selection through `ParameterSet`,
+  `BoxedKeyPair`, `BoxedSigningKey`, `BoxedVerifyingKey`, and
+  boxed attached and detached signatures.
+- Matching inherent attached and detached sign/verify methods across the
+  compile-time and runtime-selected key APIs.
 
 ### Changed
 
@@ -32,6 +40,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that could reuse a one-time signature index.
 - PKCS#8 decoding now rejects an embedded public key that does not match the
   private key.
+- Authentication-tree roots and cached root messages now use fixed-size digest
+  arrays instead of variable-length vectors.
+- Detached signing and verification now stream borrowed message bytes instead
+  of allocating combined signature-and-message buffers.
+- Small bounded hash and WOTS workspaces now use fixed scratch arrays, and
+  retained authentication paths and WOTS signatures use exact-length boxed
+  slices. This reduces allocation churn and cache metadata without discarding
+  the upper-layer signatures that make warm XMSS^MT signing fast.
+- Expanded README and API documentation covering state persistence, runtime
+  parameter selection, `no_std`, XMSS versus XMSS^MT selection, and traversal
+  performance.
 
 [Unreleased]: https://github.com/RustCrypto/pq-xmss/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/RustCrypto/pq-xmss/releases/tag/v0.1.0

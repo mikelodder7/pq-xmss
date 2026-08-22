@@ -1,8 +1,12 @@
-use crate::error::XmssResult;
+use crate::error::{Error, XmssResult};
 use crate::hash::{addr_to_bytes, prf_keygen, thash_f};
 use crate::hash_address::{set_chain_addr, set_hash_addr, set_key_and_mask};
 use crate::params::XmssParams;
 use crate::utils::ull_to_bytes;
+use zeroize::Zeroize;
+
+const MAX_N: usize = 64;
+const MAX_WOTS_LEN: usize = 131;
 
 /// Expands an `n`-byte seed into a `wots_len * n`-byte array using `prf_keygen`.
 fn expand_seed(
@@ -13,7 +17,14 @@ fn expand_seed(
     addr: &mut [u32; 8],
 ) -> XmssResult<()> {
     let n = params.n as usize;
-    let mut buf = vec![0u8; n + 32];
+    if n > MAX_N {
+        return Err(Error::Hash {
+            n: params.n,
+            func: params.func,
+        });
+    }
+    let mut buf_storage = [0u8; MAX_N + 32];
+    let buf = &mut buf_storage[..n + 32];
 
     set_hash_addr(addr, 0);
     set_key_and_mask(addr, 0);
@@ -25,7 +36,7 @@ fn expand_seed(
         prf_keygen(
             params,
             &mut outseeds[i as usize * n..(i as usize + 1) * n],
-            &buf,
+            buf,
             inseed,
         )?;
     }
@@ -44,17 +55,24 @@ fn gen_chain(
     addr: &mut [u32; 8],
 ) -> XmssResult<()> {
     let n = params.n as usize;
+    if n > MAX_N {
+        return Err(Error::Hash {
+            n: params.n,
+            func: params.func,
+        });
+    }
 
     out[..n].copy_from_slice(&input[..n]);
+    let mut tmp = [0u8; MAX_N];
 
     let mut i = start;
     while i < start + steps && i < params.wots_w {
         set_hash_addr(addr, i);
-        let mut tmp = vec![0u8; n];
-        tmp.copy_from_slice(&out[..n]);
-        thash_f(params, out, &tmp, pub_seed, addr)?;
+        tmp[..n].copy_from_slice(&out[..n]);
+        thash_f(params, out, &tmp[..n], pub_seed, addr)?;
         i += 1;
     }
+    tmp.zeroize();
     Ok(())
 }
 
@@ -81,7 +99,11 @@ fn base_w(params: &XmssParams, output: &mut [u32], input: &[u8]) {
 }
 
 /// Computes the WOTS+ checksum over a message in base `w`.
-fn wots_checksum(params: &XmssParams, csum_base_w: &mut [u32], msg_base_w: &[u32]) {
+fn wots_checksum(
+    params: &XmssParams,
+    csum_base_w: &mut [u32],
+    msg_base_w: &[u32],
+) -> XmssResult<()> {
     let mut csum: u32 = 0;
 
     for val in msg_base_w.iter().take(params.wots_len1 as usize) {
@@ -90,17 +112,21 @@ fn wots_checksum(params: &XmssParams, csum_base_w: &mut [u32], msg_base_w: &[u32
 
     csum <<= 8 - ((params.wots_len2 * params.wots_log_w) % 8);
     let csum_bytes_len = (params.wots_len2 * params.wots_log_w).div_ceil(8) as usize;
-    let mut csum_bytes = vec![0u8; csum_bytes_len];
-    ull_to_bytes(&mut csum_bytes, u64::from(csum));
-    base_w(params, csum_base_w, &csum_bytes);
+    let mut csum_bytes = [0u8; 8];
+    let bytes = csum_bytes
+        .get_mut(..csum_bytes_len)
+        .ok_or(Error::InvalidParams(params.wots_w))?;
+    ull_to_bytes(bytes, u64::from(csum));
+    base_w(params, csum_base_w, bytes);
+    Ok(())
 }
 
 /// Takes a message and derives the matching chain lengths.
-fn chain_lengths(params: &XmssParams, lengths: &mut [u32], msg: &[u8]) {
+fn chain_lengths(params: &XmssParams, lengths: &mut [u32], msg: &[u8]) -> XmssResult<()> {
     let len1 = params.wots_len1 as usize;
     base_w(params, &mut lengths[..len1], msg);
     let (msg_part, csum_part) = lengths.split_at_mut(len1);
-    wots_checksum(params, csum_part, msg_part);
+    wots_checksum(params, csum_part, msg_part)
 }
 
 /// Generates a WOTS key. Expands a 32-byte private-key seed into a full WOTS
@@ -113,24 +139,31 @@ pub fn wots_pkgen(
     addr: &mut [u32; 8],
 ) -> XmssResult<()> {
     let n = params.n as usize;
+    if n > MAX_N {
+        return Err(Error::Hash {
+            n: params.n,
+            func: params.func,
+        });
+    }
 
     expand_seed(params, pk, seed, pub_seed, addr)?;
+    let mut tmp = [0u8; MAX_N];
 
     for i in 0..params.wots_len as usize {
         #[allow(clippy::cast_possible_truncation)]
         set_chain_addr(addr, i as u32);
-        let mut tmp = vec![0u8; n];
-        tmp.copy_from_slice(&pk[i * n..(i + 1) * n]);
+        tmp[..n].copy_from_slice(&pk[i * n..(i + 1) * n]);
         gen_chain(
             params,
             &mut pk[i * n..],
-            &tmp,
+            &tmp[..n],
             0,
             params.wots_w - 1,
             pub_seed,
             addr,
         )?;
     }
+    tmp.zeroize();
     Ok(())
 }
 
@@ -145,27 +178,37 @@ pub fn wots_sign(
     addr: &mut [u32; 8],
 ) -> XmssResult<()> {
     let n = params.n as usize;
-    let mut lengths = vec![0u32; params.wots_len as usize];
+    if n > MAX_N {
+        return Err(Error::Hash {
+            n: params.n,
+            func: params.func,
+        });
+    }
+    let mut lengths_storage = [0u32; MAX_WOTS_LEN];
+    let lengths = lengths_storage
+        .get_mut(..params.wots_len as usize)
+        .ok_or(Error::InvalidParams(params.wots_w))?;
 
-    chain_lengths(params, &mut lengths, msg);
+    chain_lengths(params, lengths, msg)?;
 
     expand_seed(params, sig, seed, pub_seed, addr)?;
+    let mut tmp = [0u8; MAX_N];
 
     for i in 0..params.wots_len as usize {
         #[allow(clippy::cast_possible_truncation)]
         set_chain_addr(addr, i as u32);
-        let mut tmp = vec![0u8; n];
-        tmp.copy_from_slice(&sig[i * n..(i + 1) * n]);
+        tmp[..n].copy_from_slice(&sig[i * n..(i + 1) * n]);
         gen_chain(
             params,
             &mut sig[i * n..],
-            &tmp,
+            &tmp[..n],
             0,
             lengths[i],
             pub_seed,
             addr,
         )?;
     }
+    tmp.zeroize();
     Ok(())
 }
 
@@ -179,9 +222,12 @@ pub fn wots_pk_from_sig(
     addr: &mut [u32; 8],
 ) -> XmssResult<()> {
     let n = params.n as usize;
-    let mut lengths = vec![0u32; params.wots_len as usize];
+    let mut lengths_storage = [0u32; MAX_WOTS_LEN];
+    let lengths = lengths_storage
+        .get_mut(..params.wots_len as usize)
+        .ok_or(Error::InvalidParams(params.wots_w))?;
 
-    chain_lengths(params, &mut lengths, msg);
+    chain_lengths(params, lengths, msg)?;
 
     for i in 0..params.wots_len as usize {
         #[allow(clippy::cast_possible_truncation)]

@@ -1,3 +1,5 @@
+use alloc::string::String;
+
 /// Error type used throughout this crate.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -7,6 +9,12 @@ pub enum Error {
     /// The parameter set name is not recognized.
     #[error("Invalid parameter set: {0}")]
     InvalidParameterSet(String),
+    /// A key or signature uses a different parameter set than expected.
+    #[error("Parameter sets do not match")]
+    ParameterSetMismatch,
+    /// The in-memory traversal cache is inconsistent with the compact key.
+    #[error("In-memory traversal state is inconsistent")]
+    TraversalState,
     /// The Winternitz parameter value is not supported.
     #[error("Invalid parameters: unsupported Winternitz parameter w={0}")]
     InvalidParams(u32),
@@ -31,6 +39,14 @@ pub enum Error {
         n: u32,
         /// The hash function identifier.
         func: u32,
+    },
+    /// A digest output has an incorrect length.
+    #[error("Invalid digest length: expected {expected}, got {got}")]
+    InvalidDigestLength {
+        /// Expected digest length in bytes.
+        expected: usize,
+        /// Actual digest length in bytes.
+        got: usize,
     },
     /// The provided key has an incorrect length.
     #[error("Invalid key length: expected {expected}, got {got}")]

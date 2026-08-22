@@ -55,8 +55,62 @@
 //! verifying_key.verify_detached(&second, b"second approval")?;
 //! # Ok::<(), pq_xmss::Error>(())
 //! ```
+//!
+//! ## Select a parameter set at runtime
+//!
+//! With `alloc` or `std`, boxed keys provide the same stateful behavior while
+//! validating the digest width and complete parameter set at runtime.
+//! The boxed API is optional; prefer generic keys when the parameter set is
+//! known at compile time.
+//!
+//! ```rust
+//! use pq_xmss::{BoxedKeyPair, ParameterSet};
+//!
+//! let parameter_set = ParameterSet::from_name("XMSSMT-SHA2_20/2_256")?;
+//! let mut keypair = BoxedKeyPair::generate(parameter_set, &mut rand::rng())?;
+//!
+//! let signed = keypair.signing_key().sign(b"attached message")?;
+//! assert_eq!(keypair.verifying_key().verify(&signed)?, b"attached message");
+//!
+//! let message = b"detached message";
+//! let detached = keypair.signing_key().sign_detached(message)?;
+//! keypair
+//!     .verifying_key()
+//!     .verify_detached(&detached, message)?;
+//! # Ok::<(), pq_xmss::Error>(())
+//! ```
+//!
+//! Generic and boxed keys use the same compact key and signature formats.
+//! Decoding a boxed key or signature additionally requires its [`ParameterSet`]
+//! because the raw signature bytes do not contain complete runtime type
+//! information.
+//!
+//! ## `no_std`
+//!
+//! This crate supports `no_std` targets with a global allocator. Disable
+//! default features and enable `alloc`:
+//!
+//! ```toml
+//! [dependencies]
+//! pq-xmss = { version = "0.1", default-features = false, features = ["alloc"] }
+//! ```
+//!
+//! Key generation requires the caller to provide a cryptographically secure
+//! random number generator. Allocator-free targets are not currently
+//! supported.
+#![no_std]
 #![doc = include_str!("../docs/extra-depths.md")]
 
+#[cfg(feature = "alloc")]
+extern crate alloc;
+#[cfg(test)]
+extern crate std;
+
+#[cfg(not(feature = "alloc"))]
+compile_error!("pq-xmss currently requires the `alloc` or `std` feature");
+
+#[cfg(feature = "alloc")]
+mod boxed;
 mod error;
 mod hash;
 mod hash_address;
@@ -70,8 +124,16 @@ mod xmss_commons;
 mod xmss_core;
 
 pub use error::{Error, XmssResult};
+pub use hash::FixedDigest;
+
+#[cfg(feature = "alloc")]
+pub use boxed::{
+    BoxedDetachedSignature, BoxedKeyPair, BoxedSignature, BoxedSigningKey, BoxedVerifyingKey,
+};
 
 pub use params::{
+    DigestOutputSize,
+    ParameterSet,
     XmssMtSha2_20_2_192,
     // XMSSMT multi-tree parameter sets
     XmssMtSha2_20_2_256,
@@ -165,7 +227,7 @@ pub use xmss::{DetachedSignature, KeyPair, Signature, SigningKey, VerifyingKey};
 
 #[cfg(test)]
 mod tests {
-    use std::sync::OnceLock;
+    use std::{format, string::ToString, sync::OnceLock, vec, vec::Vec};
 
     use super::*;
 
@@ -425,6 +487,42 @@ mod tests {
     }
 
     #[test]
+    fn test_large_detached_message() {
+        let mut keypair = xmss_test_keypair();
+        let message = vec![0x5a; 1024 * 1024];
+
+        let signature = keypair.signing_key().sign_detached(&message).unwrap();
+        assert_eq!(signature.as_ref().len(), TestParams::SIG_LEN);
+        keypair
+            .verifying_key()
+            .verify_detached(&signature, &message)
+            .unwrap();
+    }
+
+    #[cfg(feature = "extra-depths")]
+    #[test]
+    fn test_streaming_message_hash_for_every_hash_family() {
+        fn roundtrip<P: XmssParameter>() {
+            let seed = vec![0x3c; P::SEED_LEN];
+            let mut keypair = KeyPair::<P>::from_seed(&seed).unwrap();
+            let message = b"streamed message hash";
+            let signature = keypair.signing_key().sign_detached(message).unwrap();
+            keypair
+                .verifying_key()
+                .verify_detached(&signature, message)
+                .unwrap();
+        }
+
+        roundtrip::<XmssSha2_192<H1>>();
+        roundtrip::<XmssSha2_256<H1>>();
+        roundtrip::<XmssSha2_512<H1>>();
+        roundtrip::<XmssShake_256<H1>>();
+        roundtrip::<XmssShake_512<H1>>();
+        roundtrip::<XmssShake256_192<H1>>();
+        roundtrip::<XmssShake256_256<H1>>();
+    }
+
+    #[test]
     fn test_xmss_verify_truncated_signature() {
         let mut kp = xmss_test_keypair();
 
@@ -485,6 +583,93 @@ mod tests {
         // Derive the verifying key from the signing key.
         let derived_pk = VerifyingKey::from(kp.signing_key_ref());
         assert_eq!(kp.verifying_key(), &derived_pk);
+    }
+
+    #[test]
+    fn test_fixed_digest_output_sizes() {
+        let output_192 = <XmssSha2_10_192 as FixedDigest>::digest(b"fixed output").unwrap();
+        let output_256 = <XmssSha2_10_256 as FixedDigest>::digest(b"fixed output").unwrap();
+        let output_512 = <XmssSha2_10_512 as FixedDigest>::digest(b"fixed output").unwrap();
+
+        assert_eq!(output_192.len(), 24);
+        assert_eq!(output_256.len(), 32);
+        assert_eq!(output_512.len(), 64);
+        assert_eq!(&output_192[..], &output_256[..24]);
+    }
+
+    #[test]
+    fn test_runtime_parameter_set_metadata() {
+        let parameter_set = ParameterSet::from_name("XMSSMT-SHA2_40/8_256").unwrap();
+        assert!(!parameter_set.is_xmss());
+        assert_eq!(parameter_set.digest_output_size().bytes(), 32);
+        assert_eq!(parameter_set.total_height(), 40);
+        assert_eq!(parameter_set.layers(), 8);
+        assert_eq!(parameter_set.tree_height(), 5);
+        assert_eq!(parameter_set.signature_len(), 18_469);
+        assert_eq!(parameter_set.to_string(), "XMSSMT-SHA2_40/8_256");
+
+        let xmss = ParameterSet::from_name("XMSS-SHA2_10_192").unwrap();
+        assert!(xmss.is_xmss());
+        assert_eq!(xmss.digest_output_size(), DigestOutputSize::Bytes24);
+        assert_eq!(xmss.digest_output_size().bytes(), 24);
+    }
+
+    #[cfg(not(coverage))]
+    #[test]
+    fn test_boxed_xmssmt_sign_reload_and_verify() {
+        let parameter_set = ParameterSet::from_name("XMSSMT-SHA2_20/2_256").unwrap();
+        let seed = vec![0x5a; 96];
+        let mut keypair = BoxedKeyPair::from_seed(parameter_set, &seed).unwrap();
+        let verifying_key = keypair.verifying_key().clone();
+        assert_eq!(verifying_key.parameter_set(), parameter_set);
+        assert_eq!(keypair.signing_key().parameter_set(), parameter_set);
+        assert_eq!(keypair.signing_key().verifying_key(), verifying_key);
+
+        let first = keypair
+            .signing_key()
+            .sign_detached(b"first runtime signature")
+            .unwrap();
+        verifying_key
+            .verify_detached(&first, b"first runtime signature")
+            .unwrap();
+        assert_eq!(first.parameter_set(), parameter_set);
+
+        let decoded_signature =
+            BoxedDetachedSignature::try_from_bytes(parameter_set, first.as_ref()).unwrap();
+        let decoded_verifying_key =
+            BoxedVerifyingKey::try_from_bytes(parameter_set, verifying_key.as_ref()).unwrap();
+        decoded_verifying_key
+            .verify_detached(&decoded_signature, b"first runtime signature")
+            .unwrap();
+
+        let other_parameter_set = ParameterSet::from_name("XMSSMT-SHAKE_20/2_256").unwrap();
+        let other_signature =
+            BoxedDetachedSignature::try_from_bytes(other_parameter_set, first.as_ref()).unwrap();
+        assert!(matches!(
+            verifying_key.verify_detached(&other_signature, b"first runtime signature"),
+            Err(Error::ParameterSetMismatch)
+        ));
+
+        let persisted = keypair.signing_key().as_ref().to_vec();
+        drop(keypair);
+        let mut resumed = BoxedSigningKey::try_from_bytes(parameter_set, &persisted).unwrap();
+        let second = resumed.sign_detached(b"second runtime signature").unwrap();
+        verifying_key
+            .verify_detached(&second, b"second runtime signature")
+            .unwrap();
+        assert_ne!(first.as_ref(), second.as_ref());
+
+        let attached = resumed.sign(b"attached runtime signature").unwrap();
+        assert_eq!(attached.parameter_set(), parameter_set);
+        let decoded_attached =
+            BoxedSignature::try_from_bytes(parameter_set, attached.as_ref()).unwrap();
+        assert_eq!(
+            verifying_key.verify(&decoded_attached).unwrap(),
+            b"attached runtime signature"
+        );
+
+        let trait_verifying_key = signature::Keypair::verifying_key(&resumed);
+        assert_eq!(trait_verifying_key, verifying_key);
     }
 
     /// Decodes a hex string to bytes. Panics on invalid input (test-only).

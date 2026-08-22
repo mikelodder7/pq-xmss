@@ -15,16 +15,21 @@ repository = "https://github.com/RustCrypto/pq-xmss"
 rust-version = "1.85"
 version = "0.1.0"
 
+[package.metadata.docs.rs]
+all-features = true
+
 [[bench]]
 harness = false
 name = "signing"
 required-features = ["extra-depths"]
 
 [features]
-default = []
+alloc = []
+default = ["std"]
 extra-depths = []
 pkcs8 = ["dep:pkcs8", "dep:spki", "dep:der", "dep:const-oid"]
 serde = ["dep:serdect"]
+std = ["alloc", "rand/std", "rand/std_rng", "rand/sys_rng", "rand/thread_rng", "subtle/std", "thiserror/std"]
 
 [dependencies]
 const-oid = { optional = true, version = "0.10" }
@@ -32,14 +37,14 @@ der = { default-features = false, features = ["alloc"], optional = true, version
 digest = "0.11"
 hybrid-array = { features = ["zeroize"], version = "0.4" }
 pkcs8 = { default-features = false, features = ["alloc"], optional = true, version = "0.11" }
-rand = "0.10"
+rand = { default-features = false, version = "0.10" }
 serdect = { features = ["alloc"], optional = true, version = "0.4" }
 sha2 = "0.11"
 shake = "0.1"
 signature = "3"
 spki = { default-features = false, features = ["alloc"], optional = true, version = "0.8" }
-subtle = "2.6"
-thiserror = "2"
+subtle = { default-features = false, features = ["i128"], version = "2.6" }
+thiserror = { default-features = false, version = "2" }
 zeroize = "1"
 
 [dev-dependencies]

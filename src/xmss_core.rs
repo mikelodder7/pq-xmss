@@ -1,3 +1,6 @@
+use alloc::{boxed::Box, vec, vec::Vec};
+
+use hybrid_array::{Array, ArraySize};
 use zeroize::Zeroize;
 
 use crate::error::{Error, XmssResult};
@@ -13,27 +16,21 @@ use crate::xmss_commons::gen_leaf_wots;
 /// This state is an acceleration cache only. The compact secret-key bytes
 /// remain authoritative and are the only state serialized by the public API.
 #[derive(Clone, Debug, Default)]
-pub(crate) struct TraversalState {
+pub(crate) struct TraversalState<N: ArraySize> {
     next_idx: Option<u64>,
-    layers: Vec<Option<LayerState>>,
+    layers: Vec<Option<LayerState<N>>>,
 }
 
 #[derive(Clone, Debug)]
-struct LayerState {
+struct LayerState<N: ArraySize> {
     tree_idx: u64,
     leaf_idx: u32,
-    root: Vec<u8>,
-    auth_path: Vec<u8>,
-    cached_wots: Option<CachedWotsSignature>,
+    root: Array<u8, N>,
+    auth_path: Box<[u8]>,
+    cached_wots: Option<Box<[u8]>>,
 }
 
-#[derive(Clone, Debug)]
-struct CachedWotsSignature {
-    message: Vec<u8>,
-    signature: Vec<u8>,
-}
-
-impl TraversalState {
+impl<N: ArraySize> TraversalState<N> {
     pub(crate) fn from_compact_key(params: &XmssParams, sk: &[u8]) -> XmssResult<Self> {
         let n = params.n as usize;
         let idx_bytes = params.index_bytes as usize;
@@ -56,11 +53,13 @@ impl TraversalState {
 
     fn from_top_tree(params: &XmssParams, root: &[u8], auth_path: &[u8]) -> Self {
         let mut layers = vec![None; params.d as usize];
+        let mut typed_root = Array::<u8, N>::default();
+        typed_root.copy_from_slice(root);
         layers[params.d as usize - 1] = Some(LayerState {
             tree_idx: 0,
             leaf_idx: 0,
-            root: root.to_vec(),
-            auth_path: auth_path.to_vec(),
+            root: typed_root,
+            auth_path: auth_path.into(),
             cached_wots: None,
         });
         Self {
@@ -119,7 +118,7 @@ impl TraversalState {
             let (tree_idx, leaf_idx) = layer_position(params, next_idx, layer);
             let state = self.layers[layer as usize]
                 .as_mut()
-                .expect("traversal state was initialized before signing");
+                .ok_or(Error::TraversalState)?;
 
             if state.tree_idx == tree_idx && state.leaf_idx == leaf_idx {
                 continue;
@@ -136,17 +135,127 @@ impl TraversalState {
     }
 }
 
-impl Zeroize for TraversalState {
+impl<N: ArraySize> Zeroize for TraversalState<N> {
     fn zeroize(&mut self) {
         for state in self.layers.iter_mut().flatten() {
             state.root.zeroize();
             state.auth_path.zeroize();
             if let Some(cached_wots) = &mut state.cached_wots {
-                cached_wots.message.zeroize();
-                cached_wots.signature.zeroize();
+                cached_wots.zeroize();
             }
         }
         self.next_idx = None;
+    }
+}
+
+/// Alloc-backed traversal state whose fixed digest width is selected at
+/// runtime from the three supported sizes.
+#[derive(Debug)]
+pub(crate) enum BoxedTraversalState {
+    N24(Box<TraversalState<hybrid_array::typenum::U24>>),
+    N32(Box<TraversalState<hybrid_array::typenum::U32>>),
+    N64(Box<TraversalState<hybrid_array::typenum::U64>>),
+}
+
+impl BoxedTraversalState {
+    pub(crate) fn from_compact_key(params: &XmssParams, sk: &[u8]) -> XmssResult<Self> {
+        match params.n {
+            24 => TraversalState::from_compact_key(params, sk)
+                .map(Box::new)
+                .map(Self::N24),
+            32 => TraversalState::from_compact_key(params, sk)
+                .map(Box::new)
+                .map(Self::N32),
+            64 => TraversalState::from_compact_key(params, sk)
+                .map(Box::new)
+                .map(Self::N64),
+            n => Err(Error::Hash {
+                n,
+                func: params.func,
+            }),
+        }
+    }
+
+    pub(crate) fn seed_keypair(
+        params: &XmssParams,
+        pk: &mut [u8],
+        sk: &mut [u8],
+        seed: &[u8],
+    ) -> XmssResult<Self> {
+        match params.n {
+            24 => xmssmt_core_seed_keypair(params, pk, sk, seed)
+                .map(Box::new)
+                .map(Self::N24),
+            32 => xmssmt_core_seed_keypair(params, pk, sk, seed)
+                .map(Box::new)
+                .map(Self::N32),
+            64 => xmssmt_core_seed_keypair(params, pk, sk, seed)
+                .map(Box::new)
+                .map(Self::N64),
+            n => Err(Error::Hash {
+                n,
+                func: params.func,
+            }),
+        }
+    }
+
+    pub(crate) fn keypair<R: rand::CryptoRng>(
+        params: &XmssParams,
+        pk: &mut [u8],
+        sk: &mut [u8],
+        rng: &mut R,
+    ) -> XmssResult<Self> {
+        match params.n {
+            24 => xmssmt_core_keypair(params, pk, sk, rng)
+                .map(Box::new)
+                .map(Self::N24),
+            32 => xmssmt_core_keypair(params, pk, sk, rng)
+                .map(Box::new)
+                .map(Self::N32),
+            64 => xmssmt_core_keypair(params, pk, sk, rng)
+                .map(Box::new)
+                .map(Self::N64),
+            n => Err(Error::Hash {
+                n,
+                func: params.func,
+            }),
+        }
+    }
+
+    pub(crate) fn sign(
+        &mut self,
+        params: &XmssParams,
+        sk: &mut [u8],
+        message: &[u8],
+    ) -> XmssResult<Vec<u8>> {
+        match self {
+            Self::N24(state) => xmssmt_core_sign(params, sk, state, message),
+            Self::N32(state) => xmssmt_core_sign(params, sk, state, message),
+            Self::N64(state) => xmssmt_core_sign(params, sk, state, message),
+        }
+    }
+
+    pub(crate) fn sign_detached(
+        &mut self,
+        params: &XmssParams,
+        sk: &mut [u8],
+        message: &[u8],
+    ) -> XmssResult<Vec<u8>> {
+        match self {
+            Self::N24(state) => xmssmt_core_sign_detached(params, sk, state, message),
+            Self::N32(state) => xmssmt_core_sign_detached(params, sk, state, message),
+            Self::N64(state) => xmssmt_core_sign_detached(params, sk, state, message),
+        }
+    }
+}
+
+impl Zeroize for BoxedTraversalState {
+    fn zeroize(&mut self) {
+        match self {
+            Self::N24(state) => state.zeroize(),
+            Self::N32(state) => state.zeroize(),
+            Self::N64(state) => state.zeroize(),
+        }
     }
 }
 
@@ -159,16 +268,16 @@ fn layer_position(params: &XmssParams, idx: u64, layer: u32) -> (u64, u32) {
     (tree_idx, leaf_idx)
 }
 
-fn build_layer_state(
+fn build_layer_state<N: ArraySize>(
     params: &XmssParams,
     layer: u32,
     tree_idx: u64,
     leaf_idx: u32,
     sk_seed: &[u8],
     pub_seed: &[u8],
-) -> XmssResult<LayerState> {
+) -> XmssResult<LayerState<N>> {
     let n = params.n as usize;
-    let mut root = vec![0u8; n];
+    let mut root = Array::<u8, N>::default();
     let mut auth_path = vec![0u8; params.tree_height as usize * n];
     let mut subtree_addr = [0u32; 8];
     set_layer_addr(&mut subtree_addr, layer);
@@ -186,14 +295,14 @@ fn build_layer_state(
         tree_idx,
         leaf_idx,
         root,
-        auth_path,
+        auth_path: auth_path.into_boxed_slice(),
         cached_wots: None,
     })
 }
 
-fn advance_auth_path(
+fn advance_auth_path<N: ArraySize>(
     params: &XmssParams,
-    state: &mut LayerState,
+    state: &mut LayerState<N>,
     layer: u32,
     sk_seed: &[u8],
     pub_seed: &[u8],
@@ -276,11 +385,12 @@ fn treehash(
 
             set_tree_height(&mut node_addr, heights[offset - 1]);
             set_tree_index(&mut node_addr, tree_idx);
-            let tmp = stack[(offset - 2) * n..offset * n].to_vec();
+            let mut tmp = [0u8; 128];
+            tmp[..2 * n].copy_from_slice(&stack[(offset - 2) * n..offset * n]);
             thash_h(
                 params,
                 &mut stack[(offset - 2) * n..(offset - 1) * n],
-                &tmp,
+                &tmp[..2 * n],
                 pub_seed,
                 &mut node_addr,
             )?;
@@ -341,11 +451,12 @@ fn treehash_root(
             let node_height = heights[offset - 1];
             set_tree_height(&mut node_addr, node_height);
             set_tree_index(&mut node_addr, idx >> (node_height + 1));
-            let tmp = stack[(offset - 2) * n..offset * n].to_vec();
+            let mut tmp = [0u8; 128];
+            tmp[..2 * n].copy_from_slice(&stack[(offset - 2) * n..offset * n]);
             thash_h(
                 params,
                 &mut stack[(offset - 2) * n..(offset - 1) * n],
-                &tmp,
+                &tmp[..2 * n],
                 pub_seed,
                 &mut node_addr,
             )?;
@@ -359,8 +470,8 @@ fn treehash_root(
 }
 
 /// Returns the secret key size for the given parameter set.
-pub fn xmss_xmssmt_core_sk_bytes(params: &XmssParams) -> u64 {
-    params.index_bytes as u64 + 4 * params.n as u64
+pub fn xmss_xmssmt_core_sk_bytes(params: &XmssParams) -> usize {
+    params.index_bytes as usize + 4 * params.n as usize
 }
 
 /// Derives an XMSSMT key pair from a given seed.
@@ -368,12 +479,12 @@ pub fn xmss_xmssmt_core_sk_bytes(params: &XmssParams) -> u64 {
 /// Secret key format: `[index || SK_SEED || SK_PRF || root || PUB_SEED]`, where
 /// the index occupies `params.index_bytes` bytes.
 /// Public key format: `[root || PUB_SEED]`, omitting the algorithm OID.
-pub fn xmssmt_core_seed_keypair(
+pub fn xmssmt_core_seed_keypair<N: ArraySize>(
     params: &XmssParams,
     pk: &mut [u8],
     sk: &mut [u8],
     seed: &[u8],
-) -> XmssResult<TraversalState> {
+) -> XmssResult<TraversalState<N>> {
     let n = params.n as usize;
     let idx_bytes = params.index_bytes as usize;
     let tree_height = params.tree_height as usize;
@@ -417,12 +528,12 @@ pub fn xmssmt_core_seed_keypair(
 /// Secret key format: `[index || SK_SEED || SK_PRF || root || PUB_SEED]`, where
 /// the index occupies `params.index_bytes` bytes.
 /// Public key format: `[root || PUB_SEED]`, omitting the algorithm OID.
-pub fn xmssmt_core_keypair<R: rand::CryptoRng>(
+pub fn xmssmt_core_keypair<N: ArraySize, R: rand::CryptoRng>(
     params: &XmssParams,
     pk: &mut [u8],
     sk: &mut [u8],
     rng: &mut R,
-) -> XmssResult<TraversalState> {
+) -> XmssResult<TraversalState<N>> {
     let n = params.n as usize;
     let mut seed = vec![0u8; 3 * n];
 
@@ -434,15 +545,43 @@ pub fn xmssmt_core_keypair<R: rand::CryptoRng>(
 
 /// Signs a message, returns the signature followed by the message, and updates
 /// the secret key in place.
-pub fn xmssmt_core_sign(
+pub fn xmssmt_core_sign<N: ArraySize>(
     params: &XmssParams,
     sk: &mut [u8],
-    traversal: &mut TraversalState,
+    traversal: &mut TraversalState<N>,
     m: &[u8],
 ) -> XmssResult<Vec<u8>> {
+    let mut signed = xmssmt_core_sign_inner(params, sk, traversal, m, m.len())?;
+    signed.extend_from_slice(m);
+    Ok(signed)
+}
+
+/// Signs a borrowed message, returns only its detached signature, and updates
+/// the secret key in place.
+pub fn xmssmt_core_sign_detached<N: ArraySize>(
+    params: &XmssParams,
+    sk: &mut [u8],
+    traversal: &mut TraversalState<N>,
+    m: &[u8],
+) -> XmssResult<Vec<u8>> {
+    xmssmt_core_sign_inner(params, sk, traversal, m, 0)
+}
+
+fn xmssmt_core_sign_inner<N: ArraySize>(
+    params: &XmssParams,
+    sk: &mut [u8],
+    traversal: &mut TraversalState<N>,
+    m: &[u8],
+    message_capacity: usize,
+) -> XmssResult<Vec<u8>> {
     let n = params.n as usize;
+    if N::USIZE != n {
+        return Err(Error::InvalidDigestLength {
+            expected: n,
+            got: N::USIZE,
+        });
+    }
     let idx_bytes = params.index_bytes as usize;
-    let mlen = m.len();
     let sig_bytes = params.sig_bytes as usize;
 
     let sk_seed_start = idx_bytes;
@@ -464,19 +603,22 @@ pub fn xmssmt_core_sign(
     }
 
     // Copy secret values out before mutating sk.
-    let mut sk_seed = sk[sk_seed_start..sk_seed_start + n].to_vec();
-    let mut sk_prf = sk[sk_prf_start..sk_prf_start + n].to_vec();
-    let pub_root = sk[pub_root_start..pub_root_start + n].to_vec();
-    let pub_seed = sk[pub_seed_start..pub_seed_start + n].to_vec();
+    let mut sk_seed = Array::<u8, N>::default();
+    sk_seed.copy_from_slice(&sk[sk_seed_start..sk_seed_start + n]);
+    let mut sk_prf = Array::<u8, N>::default();
+    sk_prf.copy_from_slice(&sk[sk_prf_start..sk_prf_start + n]);
+    let mut pub_root = Array::<u8, N>::default();
+    pub_root.copy_from_slice(&sk[pub_root_start..pub_root_start + n]);
+    let mut pub_seed = Array::<u8, N>::default();
+    pub_seed.copy_from_slice(&sk[pub_seed_start..pub_seed_start + n]);
 
     traversal.ensure(params, idx, &sk_seed, &pub_seed)?;
 
-    let mut sm = vec![0u8; sig_bytes + mlen];
+    let mut sm = Vec::with_capacity(sig_bytes + message_capacity);
+    sm.resize(sig_bytes, 0);
 
     let mut ots_addr = [0u32; 8];
     set_type(&mut ots_addr, XMSS_ADDR_TYPE_OTS);
-
-    sm[sig_bytes..].copy_from_slice(m);
 
     // Write index into signature.
     sm[..idx_bytes].copy_from_slice(&sk[..idx_bytes]);
@@ -501,19 +643,14 @@ pub fn xmssmt_core_sign(
         &sk_prf,
     )?;
 
-    let mut root = vec![0u8; n];
-    let prefix_len = params.padding_len as usize + 3 * n;
-    let prefix_start = sig_bytes - prefix_len;
-    // Copy R to avoid a borrow conflict: sm is read for R and mutated for the prefix.
-    let r_val = sm[idx_bytes..idx_bytes + n].to_vec();
+    let mut root = Array::<u8, N>::default();
     hash_message(
         params,
         &mut root,
-        &r_val,
+        &sm[idx_bytes..idx_bytes + n],
         &pub_root,
         idx,
-        &mut sm[prefix_start..],
-        mlen as u64,
+        m,
     )?;
 
     let mut sm_offset = idx_bytes + n;
@@ -527,11 +664,7 @@ pub fn xmssmt_core_sign(
 
         let layer_state = traversal.layers[i as usize]
             .as_mut()
-            .expect("traversal state was initialized before signing");
-        let reusable_wots = layer_state
-            .cached_wots
-            .as_ref()
-            .filter(|cached_wots| cached_wots.message == root);
+            .ok_or(Error::TraversalState)?;
         if i == 0 {
             wots_sign(
                 params,
@@ -541,9 +674,8 @@ pub fn xmssmt_core_sign(
                 &pub_seed,
                 &mut ots_addr,
             )?;
-        } else if let Some(cached_wots) = reusable_wots {
-            sm[sm_offset..sm_offset + params.wots_sig_bytes as usize]
-                .copy_from_slice(&cached_wots.signature);
+        } else if let Some(cached_wots) = &layer_state.cached_wots {
+            sm[sm_offset..sm_offset + params.wots_sig_bytes as usize].copy_from_slice(cached_wots);
         } else {
             let mut signature = vec![0u8; params.wots_sig_bytes as usize];
             wots_sign(
@@ -555,10 +687,7 @@ pub fn xmssmt_core_sign(
                 &mut ots_addr,
             )?;
             sm[sm_offset..sm_offset + signature.len()].copy_from_slice(&signature);
-            layer_state.cached_wots = Some(CachedWotsSignature {
-                message: root.clone(),
-                signature,
-            });
+            layer_state.cached_wots = Some(signature.into_boxed_slice());
         }
         sm_offset += params.wots_sig_bytes as usize;
 
@@ -580,9 +709,7 @@ pub fn xmssmt_core_sign(
 
     // If this was the last valid index, zero the secret key material in sk.
     if idx == max_idx {
-        #[allow(clippy::cast_possible_truncation)]
-        let sk_bytes_len = params.sk_bytes as usize;
-        for b in sk[idx_bytes..sk_bytes_len].iter_mut() {
+        for b in sk[idx_bytes..params.sk_bytes].iter_mut() {
             *b = 0;
         }
     }
@@ -595,6 +722,7 @@ mod tests {
     use super::*;
     use crate::params::{XmssMtSha2_20_2_256, XmssParameter};
     use crate::xmss_commons::xmssmt_core_sign_open;
+    use hybrid_array::typenum::U32;
 
     #[test]
     fn traversal_crosses_xmssmt_subtree_boundaries() {
@@ -611,11 +739,12 @@ mod tests {
         params.sk_bytes = xmss_xmssmt_core_sk_bytes(&params);
 
         let mut pk = vec![0u8; params.pk_bytes as usize];
-        let mut sk = vec![0u8; params.sk_bytes as usize];
+        let mut sk = vec![0u8; params.sk_bytes];
         let seed: Vec<u8> = (0..params.get_seed_length())
             .map(|value| value as u8)
             .collect();
-        let mut traversal = xmssmt_core_seed_keypair(&params, &mut pk, &mut sk, &seed).unwrap();
+        let mut traversal: TraversalState<U32> =
+            xmssmt_core_seed_keypair(&params, &mut pk, &mut sk, &seed).unwrap();
 
         for index in 0u8..16 {
             let message = [index];

@@ -1,3 +1,4 @@
+use alloc::{string::ToString, vec, vec::Vec};
 use core::fmt;
 #[cfg(feature = "extra-depths")]
 use core::marker::PhantomData;
@@ -12,6 +13,7 @@ type TSum<A, B> = <A as core::ops::Add<B>>::Output;
 type TProd<A, B> = <A as core::ops::Mul<B>>::Output;
 
 use crate::error::{Error, XmssResult};
+use crate::hash::{CoreHash, FixedDigest, fixed_digest, fixed_digest_into, runtime_digest};
 use crate::xmss_core::xmss_xmssmt_core_sk_bytes;
 
 /// Hash function identifier for SHA-2.
@@ -24,11 +26,17 @@ pub(crate) const XMSS_SHAKE256: u32 = 2;
 /// Length of the OID prefix in serialized keys, in bytes.
 pub(crate) const XMSS_OID_LEN: usize = 4;
 
-/// Trait defining an XMSS or XMSSMT parameter set at compile time.
+/// Defines an XMSS or XMSS^MT parameter set at compile time.
+///
+/// Applications normally select one of the concrete parameter types exported
+/// by this crate. Use [`ParameterSet`] and the boxed key API when the choice
+/// must instead be made at runtime.
 #[allow(private_interfaces)]
 pub trait XmssParameter: Sized + Clone + fmt::Debug + Default + 'static {
     /// Hash output length (`U24`, `U32`, or `U64`).
     type N: ArraySize + fmt::Debug + Clone + PartialEq + Eq;
+    /// Hash implementation with an effective output size of [`Self::N`].
+    type Hash: FixedDigest<OutputSize = Self::N>;
     /// Signing key length as a type-level unsigned integer.
     type SkLen: ArraySize + fmt::Debug + Clone + PartialEq + Eq;
     /// Verifying key length as a type-level unsigned integer.
@@ -114,6 +122,7 @@ macro_rules! define_xmss_parameter {
         #[allow(private_interfaces)]
         impl XmssParameter for $name {
             type N = $n_type;
+            type Hash = Self;
             type SkLen = TSum<TSum<U4, $idx_type>, TProd<$n_type, U4>>;
             type VkLen = TSum<U4, TProd<$n_type, U2>>;
             type SeedLen = TProd<$n_type, U3>;
@@ -129,7 +138,16 @@ macro_rules! define_xmss_parameter {
             fn xmss_params() -> XmssParams {
                 let mut params = XmssParams::default();
                 $oid.initialize(&mut params).unwrap();
+                params.hash = fixed_digest_into::<Self>;
                 params
+            }
+        }
+
+        impl FixedDigest for $name {
+            type OutputSize = $n_type;
+
+            fn digest(input: &[u8]) -> XmssResult<hybrid_array::Array<u8, Self::OutputSize>> {
+                fixed_digest::<Self::OutputSize>($oid.hash_function(), input)
             }
         }
     };
@@ -444,9 +462,16 @@ const fn extra_depth_oid(family: u32, height: u32) -> u32 {
 }
 
 #[cfg(feature = "extra-depths")]
-fn extra_xmss_params(func: u32, n: u32, padding_len: u32, height: u32) -> XmssParams {
+fn extra_xmss_params(
+    func: u32,
+    n: u32,
+    padding_len: u32,
+    height: u32,
+    hash: CoreHash,
+) -> XmssParams {
     let wots_len = 2 * n + 3;
     XmssParams {
+        hash,
         func,
         n,
         padding_len,
@@ -462,7 +487,7 @@ fn extra_xmss_params(func: u32, n: u32, padding_len: u32, height: u32) -> XmssPa
         index_bytes: 4,
         sig_bytes: 4 + n + wots_len * n + height * n,
         pk_bytes: 2 * n,
-        sk_bytes: u64::from(4 + 4 * n),
+        sk_bytes: (4 + 4 * n) as usize,
         bds_k: 0,
     }
 }
@@ -481,6 +506,7 @@ macro_rules! define_extra_xmss_family {
         #[allow(private_interfaces)]
         impl<D: XmssTreeDepth> XmssParameter for $name<D> {
             type N = $n_type;
+            type Hash = Self;
             type SkLen = TSum<TSum<U4, U4>, TProd<$n_type, U4>>;
             type VkLen = TSum<U4, TProd<$n_type, U2>>;
             type SeedLen = TProd<$n_type, U3>;
@@ -494,7 +520,21 @@ macro_rules! define_extra_xmss_family {
             const IS_XMSS: bool = true;
 
             fn xmss_params() -> XmssParams {
-                extra_xmss_params($func, $n, $padding, D::HEIGHT)
+                extra_xmss_params(
+                    $func,
+                    $n,
+                    $padding,
+                    D::HEIGHT,
+                    fixed_digest_into::<Self>,
+                )
+            }
+        }
+
+        impl<D: XmssTreeDepth> FixedDigest for $name<D> {
+            type OutputSize = $n_type;
+
+            fn digest(input: &[u8]) -> XmssResult<hybrid_array::Array<u8, Self::OutputSize>> {
+                fixed_digest::<Self::OutputSize>($func, input)
             }
         }
     };
@@ -1121,8 +1161,9 @@ define_xmss_parameter!(
 const XMSSMT_OID_OFFSET: u32 = 0x0001_0000;
 
 /// XMSS parameter set derived from an OID.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug)]
 pub(crate) struct XmssParams {
+    pub(crate) hash: CoreHash,
     pub(crate) func: u32,
     pub(crate) n: u32,
     pub(crate) padding_len: u32,
@@ -1138,14 +1179,158 @@ pub(crate) struct XmssParams {
     pub(crate) index_bytes: u32,
     pub(crate) sig_bytes: u32,
     pub(crate) pk_bytes: u32,
-    pub(crate) sk_bytes: u64,
+    pub(crate) sk_bytes: usize,
     pub(crate) bds_k: u32,
+}
+
+fn invalid_core_hash(_out: &mut [u8], _input: &[u8]) -> XmssResult<()> {
+    Err(Error::Hash { n: 0, func: 0 })
+}
+
+impl Default for XmssParams {
+    fn default() -> Self {
+        Self {
+            hash: invalid_core_hash,
+            func: 0,
+            n: 0,
+            padding_len: 0,
+            wots_w: 0,
+            wots_log_w: 0,
+            wots_len1: 0,
+            wots_len2: 0,
+            wots_len: 0,
+            wots_sig_bytes: 0,
+            full_height: 0,
+            tree_height: 0,
+            d: 0,
+            index_bytes: 0,
+            sig_bytes: 0,
+            pk_bytes: 0,
+            sk_bytes: 0,
+            bds_k: 0,
+        }
+    }
 }
 
 impl XmssParams {
     /// Returns the length of the seed required for key generation.
     pub(crate) fn get_seed_length(&self) -> usize {
         self.n as usize * 3
+    }
+}
+
+/// A supported XMSS digest output size selected at runtime.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum DigestOutputSize {
+    /// A 192-bit (24-byte) output.
+    Bytes24,
+    /// A 256-bit (32-byte) output.
+    Bytes32,
+    /// A 512-bit (64-byte) output.
+    Bytes64,
+}
+
+impl DigestOutputSize {
+    /// Returns the output size in bytes.
+    pub const fn bytes(self) -> usize {
+        match self {
+            Self::Bytes24 => 24,
+            Self::Bytes32 => 32,
+            Self::Bytes64 => 64,
+        }
+    }
+}
+
+/// A standardized XMSS or XMSS^MT parameter set selected at runtime.
+///
+/// This is the runtime counterpart to the compile-time types implementing
+/// [`XmssParameter`]. It accepts only parameter sets registered by RFC 8391 or
+/// NIST SP 800-208. Non-standard `extra-depths` types remain compile-time only.
+/// Names use the specification spelling, such as `XMSS-SHA2_10_256` or
+/// `XMSSMT-SHA2_20/2_256`.
+///
+/// # Example
+///
+/// ```rust
+/// use pq_xmss::{DigestOutputSize, ParameterSet};
+///
+/// let parameters = ParameterSet::from_name("XMSSMT-SHA2_40/8_256")?;
+/// assert!(!parameters.is_xmss());
+/// assert_eq!(parameters.digest_output_size(), DigestOutputSize::Bytes32);
+/// assert_eq!(parameters.total_height(), 40);
+/// assert_eq!(parameters.layers(), 8);
+/// assert_eq!(parameters.tree_height(), 5);
+/// # Ok::<(), pq_xmss::Error>(())
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ParameterSet(XmssOid);
+
+impl ParameterSet {
+    /// Parses a standardized parameter-set name.
+    pub fn from_name(name: &str) -> XmssResult<Self> {
+        name.parse()
+    }
+
+    /// Returns whether this parameter set is single-tree XMSS.
+    pub const fn is_xmss(self) -> bool {
+        self.0.is_xmss()
+    }
+
+    /// Returns its effective digest output size.
+    pub fn digest_output_size(self) -> DigestOutputSize {
+        match self.params().n {
+            24 => DigestOutputSize::Bytes24,
+            32 => DigestOutputSize::Bytes32,
+            64 => DigestOutputSize::Bytes64,
+            _ => DigestOutputSize::Bytes32,
+        }
+    }
+
+    /// Returns the total Merkle-tree height.
+    pub fn total_height(self) -> u32 {
+        self.params().full_height
+    }
+
+    /// Returns the number of XMSS layers.
+    pub fn layers(self) -> u32 {
+        self.params().d
+    }
+
+    /// Returns the height of each XMSS tree.
+    pub fn tree_height(self) -> u32 {
+        self.params().tree_height
+    }
+
+    /// Returns the detached-signature length in bytes.
+    pub fn signature_len(self) -> usize {
+        self.params().sig_bytes as usize
+    }
+
+    pub(crate) fn params(self) -> XmssParams {
+        let mut params = XmssParams::default();
+        // `ParameterSet` can only contain a registered `XmssOid`.
+        if self.0.initialize(&mut params).is_err() {
+            return XmssParams::default();
+        }
+        params
+    }
+
+    pub(crate) const fn raw_oid(self) -> u32 {
+        self.0.raw_oid()
+    }
+}
+
+impl FromStr for ParameterSet {
+    type Err = Error;
+
+    fn from_str(name: &str) -> Result<Self, Self::Err> {
+        XmssOid::from_str(name).map(Self)
+    }
+}
+
+impl fmt::Display for ParameterSet {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
     }
 }
 
@@ -1238,8 +1423,27 @@ pub(crate) enum XmssOid {
 }
 
 impl XmssOid {
+    const fn hash_function(self) -> u32 {
+        let raw = self.raw_oid();
+        if self.is_xmss() {
+            match raw {
+                0x01..=0x06 | 0x0d..=0x0f => XMSS_SHA2,
+                0x07..=0x09 => XMSS_SHAKE128,
+                0x0a..=0x0c | 0x10..=0x15 => XMSS_SHAKE256,
+                _ => u32::MAX,
+            }
+        } else {
+            match raw {
+                0x01..=0x10 | 0x21..=0x28 => XMSS_SHA2,
+                0x11..=0x18 => XMSS_SHAKE128,
+                0x19..=0x20 | 0x29..=0x38 => XMSS_SHAKE256,
+                _ => u32::MAX,
+            }
+        }
+    }
+
     /// Returns `true` if this is an XMSS (single-tree) parameter set.
-    pub(crate) fn is_xmss(self) -> bool {
+    pub(crate) const fn is_xmss(self) -> bool {
         (self as u32) < XMSSMT_OID_OFFSET
     }
 
@@ -1378,6 +1582,7 @@ impl XmssOid {
 
         params.pk_bytes = 2 * params.n;
         params.sk_bytes = xmss_xmssmt_core_sk_bytes(params);
+        params.hash = runtime_digest(params.func, params.n)?;
 
         Ok(())
     }
