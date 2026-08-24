@@ -6,14 +6,14 @@ Pure Rust implementation of XMSS (eXtended Merkle Signature Scheme)
 as described in RFC 8391 and SP 800-208
 """
 edition = "2024"
-homepage = "https://github.com/RustCrypto/pq-xmss"
+homepage = "https://github.com/mikelodder7/pq-xmss"
 keywords = ["xmss", "signature", "crypto", "cryptography", "rfc8391"]
 license = "Apache-2.0 OR MIT"
 name = "pq-xmss"
 readme = "README.md"
-repository = "https://github.com/RustCrypto/pq-xmss"
+repository = "https://github.com/mikelodder7/pq-xmss"
 rust-version = "1.85"
-version = "0.1.0"
+version = "0.1.1"
 
 [package.metadata.docs.rs]
 all-features = true

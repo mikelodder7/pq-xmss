@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-08-24
+
+### Fixed
+
+- Corrected the package homepage and repository metadata and the README build
+  and code coverage badge links to reference `mikelodder7/pq-xmss` instead of
+  the old `RustCrypto/pq-xmss` path.
+- Replaced the outdated RustCrypto-branded README heading with the project name
+  and removed its obsolete link reference.
+- Published the extra tree depths guide as an `extra_depths` module so it is
+  available in generated Cargo documentation.
+
 ## [0.1.0] - 2026-08-22
 
 ### Added
@@ -52,5 +64,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   parameter selection, `no_std`, XMSS versus XMSS^MT selection, and traversal
   performance.
 
-[Unreleased]: https://github.com/RustCrypto/pq-xmss/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/RustCrypto/pq-xmss/releases/tag/v0.1.0
+[Unreleased]: https://github.com/mikelodder7/pq-xmss/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/mikelodder7/pq-xmss/compare/v0.1.0...v0.1.1
+[0.1.0]: https://github.com/mikelodder7/pq-xmss/releases/tag/v0.1.0

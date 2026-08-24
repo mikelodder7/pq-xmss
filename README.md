@@ -1,11 +1,11 @@
-# [RustCrypto]: XMSS
+# XMSS
 
 [![Crate][crate-image]][crate-link]
 [![Docs][docs-image]][docs-link]
 ![Apache2/MIT licensed][license-image]
 [![Downloads][downloads-image]][crate-link]
-![build](https://github.com/RustCrypto/pq-xmss/actions/workflows/ci.yml/badge.svg)
-[![codecov](https://codecov.io/gh/RustCrypto/pq-xmss/branch/master/graph/badge.svg)](https://codecov.io/gh/RustCrypto/pq-xmss)
+![build](https://github.com/mikelodder7/pq-xmss/actions/workflows/ci.yml/badge.svg)
+[![codecov](https://codecov.io/gh/mikelodder7/pq-xmss/branch/master/graph/badge.svg)](https://codecov.io/gh/mikelodder7/pq-xmss)
 ![MSRV][msrv-image]
 
 Pure Rust implementation of the XMSS (eXtended Merkle Signature Scheme)
@@ -314,6 +314,5 @@ conditions.
 
 [//]: # (links)
 
-[RustCrypto]: https://github.com/RustCrypto
 [RFC 8391]: https://www.rfc-editor.org/rfc/rfc8391
 [NIST SP 800-208]: https://csrc.nist.gov/pubs/sp/800/208/final

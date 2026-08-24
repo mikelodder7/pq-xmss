@@ -99,7 +99,6 @@
 //! random number generator. Allocator-free targets are not currently
 //! supported.
 #![no_std]
-#![doc = include_str!("../docs/extra-depths.md")]
 
 #[cfg(feature = "alloc")]
 extern crate alloc;
@@ -112,6 +111,8 @@ compile_error!("pq-xmss currently requires the `alloc` or `std` feature");
 #[cfg(feature = "alloc")]
 mod boxed;
 mod error;
+#[doc = include_str!("../docs/extra-depths.md")]
+pub mod extra_depths {}
 mod hash;
 mod hash_address;
 mod params;
