@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-08-24
+
+### Fixed
+
+- Added generated documentation badges for public APIs gated by the `alloc`,
+  `extra-depths`, `pkcs8`, and `serde` Cargo features.
+- Updated the extra-depth marker and parameter-family documentation to state
+  their feature requirement and link directly to the `extra_depths` guide.
+
 ## [0.1.1] - 2026-08-24
 
 ### Fixed
@@ -64,6 +73,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   parameter selection, `no_std`, XMSS versus XMSS^MT selection, and traversal
   performance.
 
-[Unreleased]: https://github.com/mikelodder7/pq-xmss/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/mikelodder7/pq-xmss/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/mikelodder7/pq-xmss/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/mikelodder7/pq-xmss/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/mikelodder7/pq-xmss/releases/tag/v0.1.0

@@ -391,6 +391,8 @@ macro_rules! define_extra_depths {
     ($($(#[$doc:meta])* $name:ident = $height:literal),+ $(,)?) => {
         $(
             $(#[$doc])*
+            #[doc = ""]
+            #[doc = "Available with the `extra-depths` Cargo feature."]
             #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
             pub struct $name;
 
@@ -498,7 +500,9 @@ macro_rules! define_extra_xmss_family {
         #[doc = concat!("Non-standard ", $display, " XMSS parameter set with a curated tree depth.")]
         #[doc = ""]
         #[doc = concat!("Combine `", stringify!($name), "` with one of the 21 types implementing [`XmssTreeDepth`].")]
-        #[doc = "See the crate-level **Extra tree depths** guide for the complete list and examples."]
+        #[doc = "See the [`extra_depths`](crate::extra_depths) guide for the complete list and examples."]
+        #[doc = ""]
+        #[doc = "Available with the `extra-depths` Cargo feature."]
         #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
         #[allow(non_camel_case_types)]
         pub struct $name<D: XmssTreeDepth>(PhantomData<D>);

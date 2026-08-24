@@ -98,6 +98,7 @@
 //! Key generation requires the caller to provide a cryptographically secure
 //! random number generator. Allocator-free targets are not currently
 //! supported.
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![no_std]
 
 #[cfg(feature = "alloc")]

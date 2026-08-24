@@ -13,7 +13,7 @@ name = "pq-xmss"
 readme = "README.md"
 repository = "https://github.com/mikelodder7/pq-xmss"
 rust-version = "1.85"
-version = "0.1.1"
+version = "0.1.2"
 
 [package.metadata.docs.rs]
 all-features = true
@@ -56,7 +56,7 @@ missing_debug_implementations = "deny"
 missing_docs = "deny"
 trivial_casts = "deny"
 trivial_numeric_casts = "deny"
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage)'] }
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage)', 'cfg(docsrs)'] }
 unsafe_code = "deny"
 unstable_features = "deny"
 unused_extern_crates = "deny"
