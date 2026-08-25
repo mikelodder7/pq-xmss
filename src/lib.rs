@@ -11,9 +11,9 @@
 //! one-time index.
 //!
 //! ```rust
-//! use pq_xmss::{KeyPair, XmssSha2_10_256};
+//! use pq_xmss::{H10, KeyPair, XmssSha2_256};
 //!
-//! let mut keypair = KeyPair::<XmssSha2_10_256>::generate(&mut rand::rng())?;
+//! let mut keypair = KeyPair::<XmssSha2_256<H10>>::generate(&mut rand::rng())?;
 //! let message = b"release manifest";
 //! let state_before = keypair.signing_key().as_ref().to_vec();
 //!
@@ -92,7 +92,7 @@
 //!
 //! ```toml
 //! [dependencies]
-//! pq-xmss = { version = "0.1", default-features = false, features = ["alloc"] }
+//! pq-xmss = { version = "0.2.0", default-features = false, features = ["alloc"] }
 //! ```
 //!
 //! Key generation requires the caller to provide a cryptographically secure
@@ -135,6 +135,9 @@ pub use boxed::{
 
 pub use params::{
     DigestOutputSize,
+    H10,
+    H16,
+    H20,
     ParameterSet,
     XmssMtSha2_20_2_192,
     // XMSSMT multi-tree parameter sets
@@ -204,25 +207,31 @@ pub use params::{
     XmssSha2_20_192,
     XmssSha2_20_256,
     XmssSha2_20_512,
+    XmssSha2_192,
+    XmssSha2_256,
+    XmssSha2_512,
     XmssShake_10_256,
     XmssShake_10_512,
     XmssShake_16_256,
     XmssShake_16_512,
     XmssShake_20_256,
     XmssShake_20_512,
+    XmssShake_256,
+    XmssShake_512,
     XmssShake256_10_192,
     XmssShake256_10_256,
     XmssShake256_16_192,
     XmssShake256_16_256,
     XmssShake256_20_192,
     XmssShake256_20_256,
+    XmssShake256_192,
+    XmssShake256_256,
+    XmssTreeDepth,
 };
 
 #[cfg(feature = "extra-depths")]
 pub use params::{
     H1, H2, H3, H4, H5, H6, H7, H8, H9, H11, H12, H13, H14, H15, H17, H18, H19, H21, H22, H23, H24,
-    XmssSha2_192, XmssSha2_256, XmssSha2_512, XmssShake_256, XmssShake_512, XmssShake256_192,
-    XmssShake256_256, XmssTreeDepth,
 };
 
 pub use xmss::{DetachedSignature, KeyPair, Signature, SigningKey, VerifyingKey};
@@ -239,20 +248,60 @@ mod tests {
     #[cfg(all(coverage, feature = "extra-depths"))]
     type TestParams = XmssSha2_256<H2>;
     #[cfg(not(all(coverage, feature = "extra-depths")))]
-    type TestParams = XmssSha2_10_256;
+    type TestParams = XmssSha2_256<H10>;
 
     fn xmss_test_keypair() -> KeyPair<TestParams> {
         static KEYPAIR: OnceLock<KeyPair<TestParams>> = OnceLock::new();
         KEYPAIR
-            .get_or_init(|| KeyPair::<TestParams>::generate(&mut rand::rng()).unwrap())
+            .get_or_init(|| {
+                KeyPair::<TestParams>::generate(&mut rand::rng())
+                    .expect("test operation should succeed")
+            })
             .clone()
     }
 
     fn xmssmt_test_keypair() -> KeyPair<XmssMtSha2_20_2_256> {
         static KEYPAIR: OnceLock<KeyPair<XmssMtSha2_20_2_256>> = OnceLock::new();
         KEYPAIR
-            .get_or_init(|| KeyPair::<XmssMtSha2_20_2_256>::generate(&mut rand::rng()).unwrap())
+            .get_or_init(|| {
+                KeyPair::<XmssMtSha2_20_2_256>::generate(&mut rand::rng())
+                    .expect("test operation should succeed")
+            })
             .clone()
+    }
+
+    #[test]
+    fn test_generic_standard_depths_match_concrete_types() {
+        fn check<G: XmssParameter, C: XmssParameter>() {
+            assert_eq!(G::NAME, C::NAME);
+            assert_eq!(G::OID, C::OID);
+            assert_eq!(G::SK_LEN, C::SK_LEN);
+            assert_eq!(G::VK_LEN, C::VK_LEN);
+            assert_eq!(G::SIG_LEN, C::SIG_LEN);
+            assert_eq!(G::SEED_LEN, C::SEED_LEN);
+        }
+
+        check::<XmssSha2_256<H10>, XmssSha2_10_256>();
+        check::<XmssSha2_256<H16>, XmssSha2_16_256>();
+        check::<XmssSha2_256<H20>, XmssSha2_20_256>();
+        check::<XmssSha2_512<H10>, XmssSha2_10_512>();
+        check::<XmssSha2_512<H16>, XmssSha2_16_512>();
+        check::<XmssSha2_512<H20>, XmssSha2_20_512>();
+        check::<XmssSha2_192<H10>, XmssSha2_10_192>();
+        check::<XmssSha2_192<H16>, XmssSha2_16_192>();
+        check::<XmssSha2_192<H20>, XmssSha2_20_192>();
+        check::<XmssShake_256<H10>, XmssShake_10_256>();
+        check::<XmssShake_256<H16>, XmssShake_16_256>();
+        check::<XmssShake_256<H20>, XmssShake_20_256>();
+        check::<XmssShake_512<H10>, XmssShake_10_512>();
+        check::<XmssShake_512<H16>, XmssShake_16_512>();
+        check::<XmssShake_512<H20>, XmssShake_20_512>();
+        check::<XmssShake256_256<H10>, XmssShake256_10_256>();
+        check::<XmssShake256_256<H16>, XmssShake256_16_256>();
+        check::<XmssShake256_256<H20>, XmssShake256_20_256>();
+        check::<XmssShake256_192<H10>, XmssShake256_10_192>();
+        check::<XmssShake256_192<H16>, XmssShake256_16_192>();
+        check::<XmssShake256_192<H20>, XmssShake256_20_192>();
     }
 
     #[test]
@@ -260,9 +309,15 @@ mod tests {
         let mut kp = xmss_test_keypair();
 
         let message = b"test message";
-        let sig = kp.signing_key().sign(message).unwrap();
+        let sig = kp
+            .signing_key()
+            .sign(message)
+            .expect("test operation should succeed");
 
-        let recovered = kp.verifying_key().verify(&sig).unwrap();
+        let recovered = kp
+            .verifying_key()
+            .verify(&sig)
+            .expect("test operation should succeed");
         assert_eq!(recovered, message);
     }
 
@@ -271,12 +326,16 @@ mod tests {
         let mut kp = xmss_test_keypair();
 
         let message = b"test message";
-        let sig = kp.signing_key().sign(message).unwrap();
+        let sig = kp
+            .signing_key()
+            .sign(message)
+            .expect("test operation should succeed");
 
         // Corrupt the signature.
         let mut sig_bytes = sig.as_ref().to_vec();
         sig_bytes[10] ^= 0xFF;
-        let bad_sig = Signature::<TestParams>::try_from(sig_bytes).unwrap();
+        let bad_sig =
+            Signature::<TestParams>::try_from(sig_bytes).expect("test operation should succeed");
 
         let result = kp.verifying_key().verify(&bad_sig);
         assert!(result.is_err());
@@ -287,9 +346,15 @@ mod tests {
         let mut kp = xmssmt_test_keypair();
 
         let message = b"test message for xmssmt";
-        let sig = kp.signing_key().sign(message).unwrap();
+        let sig = kp
+            .signing_key()
+            .sign(message)
+            .expect("test operation should succeed");
 
-        let recovered = kp.verifying_key().verify(&sig).unwrap();
+        let recovered = kp
+            .verifying_key()
+            .verify(&sig)
+            .expect("test operation should succeed");
         assert_eq!(recovered, message);
     }
 
@@ -297,9 +362,11 @@ mod tests {
     fn test_xmssmt_key_encoding_roundtrip() {
         let kp = xmssmt_test_keypair();
         let signing_key =
-            SigningKey::<XmssMtSha2_20_2_256>::try_from(kp.signing_key_ref().as_ref()).unwrap();
+            SigningKey::<XmssMtSha2_20_2_256>::try_from(kp.signing_key_ref().as_ref())
+                .expect("test operation should succeed");
         let verifying_key =
-            VerifyingKey::<XmssMtSha2_20_2_256>::try_from(kp.verifying_key().as_ref()).unwrap();
+            VerifyingKey::<XmssMtSha2_20_2_256>::try_from(kp.verifying_key().as_ref())
+                .expect("test operation should succeed");
 
         assert_eq!(signing_key, *kp.signing_key_ref());
         assert_eq!(verifying_key, *kp.verifying_key());
@@ -338,14 +405,17 @@ mod tests {
         check::<H7>();
         check::<H8>();
         check::<H9>();
+        check::<H10>();
         check::<H11>();
         check::<H12>();
         check::<H13>();
         check::<H14>();
         check::<H15>();
+        check::<H16>();
         check::<H17>();
         check::<H18>();
         check::<H19>();
+        check::<H20>();
         check::<H21>();
         check::<H22>();
         check::<H23>();
@@ -357,26 +427,35 @@ mod tests {
     fn test_extra_depth_h1_roundtrip_and_exhaustion() {
         type Params = XmssSha2_256<H1>;
 
-        let mut kp = KeyPair::<Params>::generate(&mut rand::rng()).unwrap();
+        let mut kp =
+            KeyPair::<Params>::generate(&mut rand::rng()).expect("test operation should succeed");
         assert_eq!(kp.verifying_key().as_ref().len(), Params::VK_LEN);
         assert_eq!(&kp.verifying_key().as_ref()[..4], &[0xff, 0x01, 0x00, 0x01]);
 
-        let signing_key = SigningKey::<Params>::try_from(kp.signing_key_ref().as_ref()).unwrap();
-        let verifying_key = VerifyingKey::<Params>::try_from(kp.verifying_key().as_ref()).unwrap();
+        let signing_key = SigningKey::<Params>::try_from(kp.signing_key_ref().as_ref())
+            .expect("test operation should succeed");
+        let verifying_key = VerifyingKey::<Params>::try_from(kp.verifying_key().as_ref())
+            .expect("test operation should succeed");
         assert_eq!(signing_key, *kp.signing_key_ref());
         assert_eq!(verifying_key, *kp.verifying_key());
 
-        let first = kp.signing_key().sign_detached(b"first").unwrap();
+        let first = kp
+            .signing_key()
+            .sign_detached(b"first")
+            .expect("test operation should succeed");
         assert_eq!(first.as_ref().len(), Params::SIG_LEN);
         kp.verifying_key()
             .verify_detached(&first, b"first")
-            .unwrap();
+            .expect("test operation should succeed");
         assert_eq!(&kp.signing_key().as_ref()[4..8], &[0, 0, 0, 1]);
 
-        let second = kp.signing_key().sign_detached(b"second").unwrap();
+        let second = kp
+            .signing_key()
+            .sign_detached(b"second")
+            .expect("test operation should succeed");
         kp.verifying_key()
             .verify_detached(&second, b"second")
-            .unwrap();
+            .expect("test operation should succeed");
         assert_eq!(&kp.signing_key().as_ref()[4..8], &[0xff; 4]);
         assert!(kp.signing_key().as_ref()[8..].iter().all(|byte| *byte == 0));
 
@@ -399,27 +478,36 @@ mod tests {
             XmssSha2_256::<H7>::OID,
             XmssSha2_256::<H8>::OID,
             XmssSha2_256::<H9>::OID,
+            XmssSha2_256::<H10>::OID,
             XmssSha2_256::<H11>::OID,
             XmssSha2_256::<H12>::OID,
             XmssSha2_256::<H13>::OID,
             XmssSha2_256::<H14>::OID,
             XmssSha2_256::<H15>::OID,
+            XmssSha2_256::<H16>::OID,
             XmssSha2_256::<H17>::OID,
             XmssSha2_256::<H18>::OID,
             XmssSha2_256::<H19>::OID,
+            XmssSha2_256::<H20>::OID,
             XmssSha2_256::<H21>::OID,
             XmssSha2_256::<H22>::OID,
             XmssSha2_256::<H23>::OID,
             XmssSha2_256::<H24>::OID,
         ];
 
-        for (position, id) in ids.iter().enumerate() {
-            assert_eq!(
-                id & 0xff,
-                [
-                    1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 13, 14, 15, 17, 18, 19, 21, 22, 23, 24
-                ][position]
-            );
+        let heights = [
+            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
+        ];
+        for (id, height) in ids.iter().zip(heights) {
+            match height {
+                10 => assert_eq!(*id, XmssSha2_10_256::OID),
+                16 => assert_eq!(*id, XmssSha2_16_256::OID),
+                20 => assert_eq!(*id, XmssSha2_20_256::OID),
+                _ => {
+                    assert_eq!(id >> 24, 0xff);
+                    assert_eq!(id & 0xff, height);
+                }
+            }
             assert_eq!(ids.iter().filter(|candidate| *candidate == id).count(), 1);
         }
 
@@ -432,8 +520,14 @@ mod tests {
 
         for i in 0..3 {
             let msg = format!("message {}", i);
-            let sig = kp.signing_key().sign(msg.as_bytes()).unwrap();
-            let recovered = kp.verifying_key().verify(&sig).unwrap();
+            let sig = kp
+                .signing_key()
+                .sign(msg.as_bytes())
+                .expect("test operation should succeed");
+            let recovered = kp
+                .verifying_key()
+                .verify(&sig)
+                .expect("test operation should succeed");
             assert_eq!(recovered, msg.as_bytes());
         }
     }
@@ -443,22 +537,30 @@ mod tests {
     fn test_compact_key_reload_matches_in_memory_traversal() {
         type Params = XmssSha2_256<H3>;
 
-        let seed: Vec<u8> = (0u8..Params::SEED_LEN as u8).collect();
-        let mut keypair = KeyPair::<Params>::from_seed(&seed).unwrap();
+        let seed_len = u8::try_from(Params::SEED_LEN).expect("test seed length should fit in u8");
+        let seed: Vec<u8> = (0u8..seed_len).collect();
+        let mut keypair =
+            KeyPair::<Params>::from_seed(&seed).expect("test operation should succeed");
         let verifying_key = keypair.verifying_key().clone();
 
         for index in 0u32..8 {
             let persisted = keypair.signing_key().as_ref().to_vec();
             assert_eq!(persisted.len(), Params::SK_LEN);
-            let mut reloaded = SigningKey::<Params>::try_from(persisted).unwrap();
+            let mut reloaded =
+                SigningKey::<Params>::try_from(persisted).expect("test operation should succeed");
             let message = index.to_be_bytes();
 
-            let cached_signature = keypair.signing_key().sign_detached(&message).unwrap();
-            let rebuilt_signature = reloaded.sign_detached(&message).unwrap();
+            let cached_signature = keypair
+                .signing_key()
+                .sign_detached(&message)
+                .expect("test operation should succeed");
+            let rebuilt_signature = reloaded
+                .sign_detached(&message)
+                .expect("test operation should succeed");
             assert_eq!(cached_signature, rebuilt_signature);
             verifying_key
                 .verify_detached(&cached_signature, &message)
-                .unwrap();
+                .expect("test operation should succeed");
         }
 
         assert!(matches!(
@@ -472,13 +574,21 @@ mod tests {
         let mut kp = xmss_test_keypair();
 
         let message = b"detached test message";
-        let sig = kp.signing_key().sign_detached(message).unwrap();
+        let sig = kp
+            .signing_key()
+            .sign_detached(message)
+            .expect("test operation should succeed");
 
         // A detached signature should not contain the message.
-        let full_sig = kp.signing_key().sign(b"another").unwrap();
+        let full_sig = kp
+            .signing_key()
+            .sign(b"another")
+            .expect("test operation should succeed");
         assert!(sig.as_ref().len() < full_sig.as_ref().len());
 
-        kp.verifying_key().verify_detached(&sig, message).unwrap();
+        kp.verifying_key()
+            .verify_detached(&sig, message)
+            .expect("test operation should succeed");
 
         // Verification of the wrong message should fail.
         assert!(
@@ -493,12 +603,15 @@ mod tests {
         let mut keypair = xmss_test_keypair();
         let message = vec![0x5a; 1024 * 1024];
 
-        let signature = keypair.signing_key().sign_detached(&message).unwrap();
+        let signature = keypair
+            .signing_key()
+            .sign_detached(&message)
+            .expect("test operation should succeed");
         assert_eq!(signature.as_ref().len(), TestParams::SIG_LEN);
         keypair
             .verifying_key()
             .verify_detached(&signature, &message)
-            .unwrap();
+            .expect("test operation should succeed");
     }
 
     #[cfg(feature = "extra-depths")]
@@ -506,13 +619,17 @@ mod tests {
     fn test_streaming_message_hash_for_every_hash_family() {
         fn roundtrip<P: XmssParameter>() {
             let seed = vec![0x3c; P::SEED_LEN];
-            let mut keypair = KeyPair::<P>::from_seed(&seed).unwrap();
+            let mut keypair =
+                KeyPair::<P>::from_seed(&seed).expect("test operation should succeed");
             let message = b"streamed message hash";
-            let signature = keypair.signing_key().sign_detached(message).unwrap();
+            let signature = keypair
+                .signing_key()
+                .sign_detached(message)
+                .expect("test operation should succeed");
             keypair
                 .verifying_key()
                 .verify_detached(&signature, message)
-                .unwrap();
+                .expect("test operation should succeed");
         }
 
         roundtrip::<XmssSha2_192<H1>>();
@@ -528,11 +645,15 @@ mod tests {
     fn test_xmss_verify_truncated_signature() {
         let mut kp = xmss_test_keypair();
 
-        let sig = kp.signing_key().sign(b"test message").unwrap();
+        let sig = kp
+            .signing_key()
+            .sign(b"test message")
+            .expect("test operation should succeed");
 
         // Truncate the signature so that it is too short.
         let short_bytes = &sig.as_ref()[..sig.as_ref().len() / 2];
-        let short_sig = Signature::<TestParams>::try_from(short_bytes).unwrap();
+        let short_sig =
+            Signature::<TestParams>::try_from(short_bytes).expect("test operation should succeed");
 
         assert!(kp.verifying_key().verify(&short_sig).is_err());
     }
@@ -549,11 +670,17 @@ mod tests {
         sk_bytes[5] = 0x00;
         sk_bytes[6] = 0x03;
         sk_bytes[7] = 0xFF; // 1023
-        let mut last_sk = SigningKey::<XmssSha2_10_256>::try_from(sk_bytes).unwrap();
+        let mut last_sk =
+            SigningKey::<TestParams>::try_from(sk_bytes).expect("test operation should succeed");
 
         // Signing at the last index should succeed.
-        let sig = last_sk.sign(b"last message").unwrap();
-        let recovered = kp.verifying_key().verify(&sig).unwrap();
+        let sig = last_sk
+            .sign(b"last message")
+            .expect("test operation should succeed");
+        let recovered = kp
+            .verifying_key()
+            .verify(&sig)
+            .expect("test operation should succeed");
         assert_eq!(recovered, b"last message");
 
         // Signing again should fail with KeyExhausted.
@@ -566,15 +693,22 @@ mod tests {
         // Sequential seed pattern: SK_SEED || SK_PRF || PUB_SEED.
         let seed: Vec<u8> = (0u8..96).collect();
 
-        let kp1 = KeyPair::<TestParams>::from_seed(&seed).unwrap();
-        let mut kp2 = KeyPair::<TestParams>::from_seed(&seed).unwrap();
+        let kp1 = KeyPair::<TestParams>::from_seed(&seed).expect("test operation should succeed");
+        let mut kp2 =
+            KeyPair::<TestParams>::from_seed(&seed).expect("test operation should succeed");
 
         // Same seed must produce identical keys.
         assert_eq!(kp1.verifying_key(), kp2.verifying_key());
 
         // Sign with one and verify with the other's public key.
-        let sig = kp2.signing_key().sign(b"deterministic test").unwrap();
-        let recovered = kp1.verifying_key().verify(&sig).unwrap();
+        let sig = kp2
+            .signing_key()
+            .sign(b"deterministic test")
+            .expect("test operation should succeed");
+        let recovered = kp1
+            .verifying_key()
+            .verify(&sig)
+            .expect("test operation should succeed");
         assert_eq!(recovered, b"deterministic test");
     }
 
@@ -589,9 +723,12 @@ mod tests {
 
     #[test]
     fn test_fixed_digest_output_sizes() {
-        let output_192 = <XmssSha2_10_192 as FixedDigest>::digest(b"fixed output").unwrap();
-        let output_256 = <XmssSha2_10_256 as FixedDigest>::digest(b"fixed output").unwrap();
-        let output_512 = <XmssSha2_10_512 as FixedDigest>::digest(b"fixed output").unwrap();
+        let output_192 = <XmssSha2_10_192 as FixedDigest>::digest(b"fixed output")
+            .expect("test operation should succeed");
+        let output_256 = <XmssSha2_10_256 as FixedDigest>::digest(b"fixed output")
+            .expect("test operation should succeed");
+        let output_512 = <XmssSha2_10_512 as FixedDigest>::digest(b"fixed output")
+            .expect("test operation should succeed");
 
         assert_eq!(output_192.len(), 24);
         assert_eq!(output_256.len(), 32);
@@ -601,7 +738,8 @@ mod tests {
 
     #[test]
     fn test_runtime_parameter_set_metadata() {
-        let parameter_set = ParameterSet::from_name("XMSSMT-SHA2_40/8_256").unwrap();
+        let parameter_set =
+            ParameterSet::from_name("XMSSMT-SHA2_40/8_256").expect("test operation should succeed");
         assert!(!parameter_set.is_xmss());
         assert_eq!(parameter_set.digest_output_size().bytes(), 32);
         assert_eq!(parameter_set.total_height(), 40);
@@ -610,7 +748,8 @@ mod tests {
         assert_eq!(parameter_set.signature_len(), 18_469);
         assert_eq!(parameter_set.to_string(), "XMSSMT-SHA2_40/8_256");
 
-        let xmss = ParameterSet::from_name("XMSS-SHA2_10_192").unwrap();
+        let xmss =
+            ParameterSet::from_name("XMSS-SHA2_10_192").expect("test operation should succeed");
         assert!(xmss.is_xmss());
         assert_eq!(xmss.digest_output_size(), DigestOutputSize::Bytes24);
         assert_eq!(xmss.digest_output_size().bytes(), 24);
@@ -619,9 +758,11 @@ mod tests {
     #[cfg(not(coverage))]
     #[test]
     fn test_boxed_xmssmt_sign_reload_and_verify() {
-        let parameter_set = ParameterSet::from_name("XMSSMT-SHA2_20/2_256").unwrap();
+        let parameter_set =
+            ParameterSet::from_name("XMSSMT-SHA2_20/2_256").expect("test operation should succeed");
         let seed = vec![0x5a; 96];
-        let mut keypair = BoxedKeyPair::from_seed(parameter_set, &seed).unwrap();
+        let mut keypair =
+            BoxedKeyPair::from_seed(parameter_set, &seed).expect("test operation should succeed");
         let verifying_key = keypair.verifying_key().clone();
         assert_eq!(verifying_key.parameter_set(), parameter_set);
         assert_eq!(keypair.signing_key().parameter_set(), parameter_set);
@@ -630,23 +771,27 @@ mod tests {
         let first = keypair
             .signing_key()
             .sign_detached(b"first runtime signature")
-            .unwrap();
+            .expect("test operation should succeed");
         verifying_key
             .verify_detached(&first, b"first runtime signature")
-            .unwrap();
+            .expect("test operation should succeed");
         assert_eq!(first.parameter_set(), parameter_set);
 
         let decoded_signature =
-            BoxedDetachedSignature::try_from_bytes(parameter_set, first.as_ref()).unwrap();
+            BoxedDetachedSignature::try_from_bytes(parameter_set, first.as_ref())
+                .expect("test operation should succeed");
         let decoded_verifying_key =
-            BoxedVerifyingKey::try_from_bytes(parameter_set, verifying_key.as_ref()).unwrap();
+            BoxedVerifyingKey::try_from_bytes(parameter_set, verifying_key.as_ref())
+                .expect("test operation should succeed");
         decoded_verifying_key
             .verify_detached(&decoded_signature, b"first runtime signature")
-            .unwrap();
+            .expect("test operation should succeed");
 
-        let other_parameter_set = ParameterSet::from_name("XMSSMT-SHAKE_20/2_256").unwrap();
+        let other_parameter_set = ParameterSet::from_name("XMSSMT-SHAKE_20/2_256")
+            .expect("test operation should succeed");
         let other_signature =
-            BoxedDetachedSignature::try_from_bytes(other_parameter_set, first.as_ref()).unwrap();
+            BoxedDetachedSignature::try_from_bytes(other_parameter_set, first.as_ref())
+                .expect("test operation should succeed");
         assert!(matches!(
             verifying_key.verify_detached(&other_signature, b"first runtime signature"),
             Err(Error::ParameterSetMismatch)
@@ -654,19 +799,26 @@ mod tests {
 
         let persisted = keypair.signing_key().as_ref().to_vec();
         drop(keypair);
-        let mut resumed = BoxedSigningKey::try_from_bytes(parameter_set, &persisted).unwrap();
-        let second = resumed.sign_detached(b"second runtime signature").unwrap();
+        let mut resumed = BoxedSigningKey::try_from_bytes(parameter_set, &persisted)
+            .expect("test operation should succeed");
+        let second = resumed
+            .sign_detached(b"second runtime signature")
+            .expect("test operation should succeed");
         verifying_key
             .verify_detached(&second, b"second runtime signature")
-            .unwrap();
+            .expect("test operation should succeed");
         assert_ne!(first.as_ref(), second.as_ref());
 
-        let attached = resumed.sign(b"attached runtime signature").unwrap();
+        let attached = resumed
+            .sign(b"attached runtime signature")
+            .expect("test operation should succeed");
         assert_eq!(attached.parameter_set(), parameter_set);
-        let decoded_attached =
-            BoxedSignature::try_from_bytes(parameter_set, attached.as_ref()).unwrap();
+        let decoded_attached = BoxedSignature::try_from_bytes(parameter_set, attached.as_ref())
+            .expect("test operation should succeed");
         assert_eq!(
-            verifying_key.verify(&decoded_attached).unwrap(),
+            verifying_key
+                .verify(&decoded_attached)
+                .expect("test operation should succeed"),
             b"attached runtime signature"
         );
 
@@ -804,8 +956,9 @@ mod tests {
             let mut kp = xmss_test_keypair();
             let sk = kp.signing_key();
 
-            let json = serde_json::to_string(&*sk).unwrap();
-            let sk2: SigningKey<TestParams> = serde_json::from_str(&json).unwrap();
+            let json = serde_json::to_string(&*sk).expect("test operation should succeed");
+            let sk2: SigningKey<TestParams> =
+                serde_json::from_str(&json).expect("test operation should succeed");
             assert_eq!(*sk, sk2);
         }
 
@@ -814,18 +967,23 @@ mod tests {
             let kp = xmss_test_keypair();
             let pk = kp.verifying_key();
 
-            let json = serde_json::to_string(pk).unwrap();
-            let pk2: VerifyingKey<TestParams> = serde_json::from_str(&json).unwrap();
+            let json = serde_json::to_string(pk).expect("test operation should succeed");
+            let pk2: VerifyingKey<TestParams> =
+                serde_json::from_str(&json).expect("test operation should succeed");
             assert_eq!(*pk, pk2);
         }
 
         #[test]
         fn test_signature_serde_json_roundtrip() {
             let mut kp = xmss_test_keypair();
-            let sig = kp.signing_key().sign(b"test message").unwrap();
+            let sig = kp
+                .signing_key()
+                .sign(b"test message")
+                .expect("test operation should succeed");
 
-            let json = serde_json::to_string(&sig).unwrap();
-            let sig2: Signature<TestParams> = serde_json::from_str(&json).unwrap();
+            let json = serde_json::to_string(&sig).expect("test operation should succeed");
+            let sig2: Signature<TestParams> =
+                serde_json::from_str(&json).expect("test operation should succeed");
             assert_eq!(sig, sig2);
         }
 
@@ -834,8 +992,9 @@ mod tests {
             let mut kp = xmss_test_keypair();
             let sk = kp.signing_key();
 
-            let bytes = postcard::to_allocvec(&*sk).unwrap();
-            let sk2: SigningKey<TestParams> = postcard::from_bytes(&bytes).unwrap();
+            let bytes = postcard::to_allocvec(&*sk).expect("test operation should succeed");
+            let sk2: SigningKey<TestParams> =
+                postcard::from_bytes(&bytes).expect("test operation should succeed");
             assert_eq!(*sk, sk2);
         }
 
@@ -844,18 +1003,23 @@ mod tests {
             let kp = xmss_test_keypair();
             let pk = kp.verifying_key();
 
-            let bytes = postcard::to_allocvec(pk).unwrap();
-            let pk2: VerifyingKey<TestParams> = postcard::from_bytes(&bytes).unwrap();
+            let bytes = postcard::to_allocvec(pk).expect("test operation should succeed");
+            let pk2: VerifyingKey<TestParams> =
+                postcard::from_bytes(&bytes).expect("test operation should succeed");
             assert_eq!(*pk, pk2);
         }
 
         #[test]
         fn test_signature_postcard_roundtrip() {
             let mut kp = xmss_test_keypair();
-            let sig = kp.signing_key().sign(b"test message").unwrap();
+            let sig = kp
+                .signing_key()
+                .sign(b"test message")
+                .expect("test operation should succeed");
 
-            let bytes = postcard::to_allocvec(&sig).unwrap();
-            let sig2: Signature<TestParams> = postcard::from_bytes(&bytes).unwrap();
+            let bytes = postcard::to_allocvec(&sig).expect("test operation should succeed");
+            let sig2: Signature<TestParams> =
+                postcard::from_bytes(&bytes).expect("test operation should succeed");
             assert_eq!(sig, sig2);
         }
     }

@@ -1,15 +1,16 @@
-# Extra tree depths
+# Tree depths
 
-The `extra-depths` Cargo feature adds non-standard, single-tree XMSS parameter
-sets for applications that need a signature capacity not offered by the
-standardized tree heights. Tree height changes signature capacity and
-performance, but it does not change the underlying hash function or digest
-strength. As with every XMSS key, security requires never reusing a signing
-index.
+Single-tree XMSS parameter sets combine a hash family with a tree-depth marker.
+The standardized `H10`, `H16`, and `H20` markers are available by default. The
+`extra-depths` Cargo feature adds every other height from 1 through 24 for
+applications that need a different signature capacity. Tree height changes
+signature capacity and performance, but it does not change the underlying hash
+function or digest strength. As with every XMSS key, security requires never
+reusing a signing index.
 
 ```toml
 [dependencies]
-pq-xmss = { version = "0.1", features = ["extra-depths"] }
+pq-xmss = { version = "0.2.0", features = ["extra-depths"] }
 ```
 
 Each parameter set combines a generic parameter family, which selects a hash
@@ -27,6 +28,10 @@ The depth controls key-generation cost, signature capacity, and the length of
 the authentication path included in each signature. A key can create at most
 `2^height` signatures.
 
+`H10`, `H16`, and `H20` are always available and use standardized parameter-set
+identifiers. Every other marker in the table requires `extra-depths` and uses a
+crate-defined private-use identifier.
+
 | Marker | Height | Maximum signatures |
 | --- | ---: | ---: |
 | `H1` | 1 | 2 |
@@ -38,29 +43,33 @@ the authentication path included in each signature. A key can create at most
 | `H7` | 7 | 128 |
 | `H8` | 8 | 256 |
 | `H9` | 9 | 512 |
+| `H10` | 10 | 1,024 |
 | `H11` | 11 | 2,048 |
 | `H12` | 12 | 4,096 |
 | `H13` | 13 | 8,192 |
 | `H14` | 14 | 16,384 |
 | `H15` | 15 | 32,768 |
+| `H16` | 16 | 65,536 |
 | `H17` | 17 | 131,072 |
 | `H18` | 18 | 262,144 |
 | `H19` | 19 | 524,288 |
+| `H20` | 20 | 1,048,576 |
 | `H21` | 21 | 2,097,152 |
 | `H22` | 22 | 4,194,304 |
 | `H23` | 23 | 8,388,608 |
 | `H24` | 24 | 16,777,216 |
 
-Heights 10, 16, and 20 already have standardized concrete parameter types,
-such as `XmssSha2_10_256`, so they do not have extra-depth marker types. The
-feature stops at height 24 because key generation grows exponentially with the
-height; choose the smallest capacity that meets the application's lifetime
-requirements.
+The older concrete names, such as `XmssSha2_10_256`, remain available as a
+compatibility interface. `XmssSha2_256<H10>` selects the same standardized
+parameter set and serialized identifier. The feature stops at height 24 because
+key generation grows exponentially with the height; choose the smallest
+capacity that meets the application's lifetime requirements.
 
 ## Available families
 
-Every depth marker above can be used with every family below, for 147 extra
-parameter sets. In the signature-size formulas, `h` is the selected height.
+Every depth marker above can be used with every family below, for 168 parameter
+sets in total: 21 standardized combinations and 147 private-use combinations.
+In the signature-size formulas, `h` is the selected height.
 
 | Generic family | Hash | `n` (bytes) | Secret key | Public key | Detached signature |
 | --- | --- | ---: | ---: | ---: | ---: |
@@ -167,13 +176,13 @@ verifying_key.verify_detached(&second, b"second")?;
 
 ## Interoperability
 
-These parameter sets are not assigned identifiers by RFC 8391 or NIST
-SP 800-208. Serialized keys use a crate-defined private-use identifier with the
-layout `0xff | family | 0x00 | height`. They interoperate only with
-implementations that adopt the same encoding. Prefer a standardized height
-when cross-implementation compatibility is required.
+Generic parameter sets using `H10`, `H16`, or `H20` have the standardized
+identifier assigned by RFC 8391 or NIST SP 800-208. All other depths use a
+crate-defined private-use identifier with the layout
+`0xff | family | 0x00 | height`; they interoperate only with implementations
+that adopt the same encoding. Prefer a standardized height when
+cross-implementation compatibility is required.
 
 Runtime [`ParameterSet`](crate::ParameterSet) and boxed-key selection accept
-only standardized parameter sets. Extra-depth keys remain available through
-their generic compile-time types so their private-use family and height cannot
-be confused with a standardized identifier.
+only standardized parameter sets. Private-use depths remain available through
+their generic compile-time types.

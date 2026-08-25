@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-25
+
+### Added
+
+- Added `H10`, `H16`, and `H20` tree-depth markers and made the generic XMSS
+  parameter families available without the `extra-depths` feature.
+
+### Changed
+
+- Generic families paired with `H10`, `H16`, or `H20` now use the corresponding
+  standardized identifiers. Existing concrete parameter names remain available
+  for compatibility.
+
 ## [0.1.2] - 2026-08-24
 
 ### Fixed
@@ -73,7 +86,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   parameter selection, `no_std`, XMSS versus XMSS^MT selection, and traversal
   performance.
 
-[Unreleased]: https://github.com/mikelodder7/pq-xmss/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/mikelodder7/pq-xmss/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/mikelodder7/pq-xmss/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/mikelodder7/pq-xmss/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/mikelodder7/pq-xmss/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/mikelodder7/pq-xmss/releases/tag/v0.1.0

@@ -33,9 +33,9 @@ const MAX_THASH_F_INPUT: usize = 3 * MAX_N;
 /// # Example
 ///
 /// ```rust
-/// use pq_xmss::{FixedDigest, XmssSha2_10_192};
+/// use pq_xmss::{FixedDigest, H10, XmssSha2_192};
 ///
-/// let output = XmssSha2_10_192::digest(b"fixed-size input")?;
+/// let output = XmssSha2_192::<H10>::digest(b"fixed-size input")?;
 /// assert_eq!(output.len(), 24);
 /// # Ok::<(), pq_xmss::Error>(())
 /// ```

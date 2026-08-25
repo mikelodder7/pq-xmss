@@ -28,7 +28,7 @@ This crate provides:
 
 - XMSS (single-tree) and XMSS^MT (multi-tree) signature schemes
 - SHA-256, SHA-512, SHAKE128, and SHAKE256 hash function support
-- 93 parameter sets covering tree heights of 10, 16, 20, 40, and 60
+- 93 standardized parameter sets, plus 147 optional private-use XMSS sets
 - Hash output sizes of 192, 256, and 512 bits
 - Optional `serde` support for compile-time key and signature types
 - Optional `pkcs8` support for compile-time PKCS#8 and SPKI key encoding
@@ -41,11 +41,11 @@ This crate provides:
 ## Usage
 
 ```rust
-use pq_xmss::{KeyPair, XmssSha2_10_256};
+use pq_xmss::{H10, KeyPair, XmssSha2_256};
 
 fn main() -> Result<(), pq_xmss::Error> {
     // Generate a key pair.
-    let mut keypair = KeyPair::<XmssSha2_10_256>::generate(&mut rand::rng())?;
+    let mut keypair = KeyPair::<XmssSha2_256<H10>>::generate(&mut rand::rng())?;
 
     // Sign a message.
     let message = b"test message";
@@ -110,32 +110,20 @@ full BDS implementation.
 
 ### XMSS (Single-Tree)
 
-| Parameter Set | Hash | `n` (bytes) | Tree Height | Maximum Signatures |
-| --- | --- | --- | --- | --- |
-| `XmssSha2_10_256` | SHA-256 | 32 | 10 | 1,024 |
-| `XmssSha2_16_256` | SHA-256 | 32 | 16 | 65,536 |
-| `XmssSha2_20_256` | SHA-256 | 32 | 20 | 1,048,576 |
-| `XmssSha2_10_512` | SHA-512 | 64 | 10 | 1,024 |
-| `XmssSha2_16_512` | SHA-512 | 64 | 16 | 65,536 |
-| `XmssSha2_20_512` | SHA-512 | 64 | 20 | 1,048,576 |
-| `XmssSha2_10_192` | SHA-256 | 24 | 10 | 1,024 |
-| `XmssSha2_16_192` | SHA-256 | 24 | 16 | 65,536 |
-| `XmssSha2_20_192` | SHA-256 | 24 | 20 | 1,048,576 |
-| `XmssShake_10_256` | SHAKE128 | 32 | 10 | 1,024 |
-| `XmssShake_16_256` | SHAKE128 | 32 | 16 | 65,536 |
-| `XmssShake_20_256` | SHAKE128 | 32 | 20 | 1,048,576 |
-| `XmssShake_10_512` | SHAKE256 | 64 | 10 | 1,024 |
-| `XmssShake_16_512` | SHAKE256 | 64 | 16 | 65,536 |
-| `XmssShake_20_512` | SHAKE256 | 64 | 20 | 1,048,576 |
-| `XmssShake256_10_256` | SHAKE256 | 32 | 10 | 1,024 |
-| `XmssShake256_16_256` | SHAKE256 | 32 | 16 | 65,536 |
-| `XmssShake256_20_256` | SHAKE256 | 32 | 20 | 1,048,576 |
-| `XmssShake256_10_192` | SHAKE256 | 24 | 10 | 1,024 |
-| `XmssShake256_16_192` | SHAKE256 | 24 | 16 | 65,536 |
-| `XmssShake256_20_192` | SHAKE256 | 24 | 20 | 1,048,576 |
+| Parameter family | Hash | `n` (bytes) | Standard depths |
+| --- | --- | ---: | --- |
+| `XmssSha2_192<D>` | SHA-256 | 24 | `H10`, `H16`, `H20` |
+| `XmssSha2_256<D>` | SHA-256 | 32 | `H10`, `H16`, `H20` |
+| `XmssSha2_512<D>` | SHA-512 | 64 | `H10`, `H16`, `H20` |
+| `XmssShake_256<D>` | SHAKE128 | 32 | `H10`, `H16`, `H20` |
+| `XmssShake_512<D>` | SHAKE256 | 64 | `H10`, `H16`, `H20` |
+| `XmssShake256_192<D>` | SHAKE256 | 24 | `H10`, `H16`, `H20` |
+| `XmssShake256_256<D>` | SHAKE256 | 32 | `H10`, `H16`, `H20` |
 
-With the `extra-depths` feature, every single-tree combination of hash function
-and output size also supports 21 additional curated heights between 1 and 24.
+The standard markers provide 1,024, 65,536, and 1,048,576 signatures,
+respectively. Existing concrete names such as `XmssSha2_10_256` remain
+available for compatibility. With the `extra-depths` feature, every family also
+supports the remaining depth markers between 1 and 24.
 See the [extra tree depths guide](docs/extra-depths.md) for every depth and
 family, size formulas, interoperability and state-management guidance, and
 three runnable examples.
@@ -158,7 +146,7 @@ parameter sets.
 Use XMSS when smaller signatures, faster verification, and a simpler tree
 structure matter most. Its single tree is a good fit when the required signing
 capacity is modest and generating the selected tree height is affordable. For
-example, `XmssSha2_10_256` permits 1,024 signatures from one key.
+example, `XmssSha2_256<H10>` permits 1,024 signatures from one key.
 
 Use XMSS^MT when a key needs a much larger signing capacity or when generating
 a single tree at the desired total height would be impractical. XMSS^MT divides
@@ -168,7 +156,7 @@ verification work because the signature contains one WOTS+ signature per
 layer. For SHA2-256, an XMSS height-20 signature is approximately 2,820 bytes,
 compared with 4,963 bytes for XMSS^MT 20/2 and 9,251 bytes for XMSS^MT 20/4.
 
-As a practical starting point, use `XmssSha2_10_256` for up to 1,024 compact
+As a practical starting point, use `XmssSha2_256<H10>` for up to 1,024 compact
 signatures and `XmssMtSha2_20_2_256` for a long-lived key with up to 2^20
 signatures. Height-40 and height-60 XMSS^MT parameter sets are best reserved for
 applications that genuinely require their enormous capacities. XMSS^MT does
@@ -233,9 +221,9 @@ Parameter types also implement `FixedDigest`, which exposes the effective XMSS
 digest size at the type level:
 
 ```rust
-use pq_xmss::{FixedDigest, XmssSha2_10_192};
+use pq_xmss::{FixedDigest, H10, XmssSha2_192};
 
-let output = XmssSha2_10_192::digest(b"XMSS input")?;
+let output = XmssSha2_192::<H10>::digest(b"XMSS input")?;
 assert_eq!(output.len(), 24);
 # Ok::<(), pq_xmss::Error>(())
 ```
@@ -247,7 +235,7 @@ features and enable `alloc` explicitly:
 
 ```toml
 [dependencies]
-pq-xmss = { version = "0.1", default-features = false, features = ["alloc"] }
+pq-xmss = { version = "0.2.0", default-features = false, features = ["alloc"] }
 ```
 
 Tree construction retains only linear-height stacks and authentication paths,
@@ -265,7 +253,7 @@ requires `alloc`.
 | Feature | Description |
 | --- | --- |
 | `alloc` | Enables heap-backed keys, signatures, traversal state, and runtime parameter selection; required when `std` is disabled |
-| `extra-depths` | Enables non-standard single-tree heights 1–9, 11–15, 17–19, and 21–24 |
+| `extra-depths` | Adds the non-standard single-tree depth markers between 1 and 24; `H10`, `H16`, and `H20` are always available |
 | `pkcs8` | Enables PKCS#8 and SPKI encoding and decoding for compile-time key types |
 | `serde` | Enables `serde` serialization and deserialization for compile-time key and signature types via `serdect` |
 | `std` | Enables standard-library support and implies `alloc` (enabled by default) |

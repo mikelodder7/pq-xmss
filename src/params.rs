@@ -1,6 +1,5 @@
 use alloc::{string::ToString, vec, vec::Vec};
 use core::fmt;
-#[cfg(feature = "extra-depths")]
 use core::marker::PhantomData;
 use core::str::FromStr;
 
@@ -28,9 +27,10 @@ pub(crate) const XMSS_OID_LEN: usize = 4;
 
 /// Defines an XMSS or XMSS^MT parameter set at compile time.
 ///
-/// Applications normally select one of the concrete parameter types exported
-/// by this crate. Use [`ParameterSet`] and the boxed key API when the choice
-/// must instead be made at runtime.
+/// Applications normally combine a generic XMSS family with a tree-depth
+/// marker, such as `XmssSha2_256<H10>`, or select a concrete XMSS^MT type. Use
+/// [`ParameterSet`] and the boxed key API when the choice must instead be made
+/// at runtime.
 #[allow(private_interfaces)]
 pub trait XmssParameter: Sized + Clone + fmt::Debug + Default + 'static {
     /// Hash output length (`U24`, `U32`, or `U64`).
@@ -365,13 +365,13 @@ define_xmss_parameter!(
     d = 1
 );
 
-// ---- Non-standard XMSS single-tree depths ----
+// ---- Generic XMSS single-tree depths ----
 
-/// A curated non-standard XMSS tree depth.
+/// A supported XMSS tree depth.
 ///
-/// Implementations of this sealed trait are available only with the
-/// `extra-depths` feature. The selected height supports `2^HEIGHT` signatures.
-#[cfg(feature = "extra-depths")]
+/// [`H10`], [`H16`], and [`H20`] select standardized parameter sets. The
+/// `extra-depths` feature adds every other marker from height 1 through 24.
+/// The selected height supports `2^HEIGHT` signatures.
 pub trait XmssTreeDepth:
     extra_depth_sealed::Sealed + Clone + fmt::Debug + Default + PartialEq + Eq + 'static
 {
@@ -381,18 +381,16 @@ pub trait XmssTreeDepth:
     const MAX_SIGNATURES: u32 = 1 << Self::HEIGHT;
 }
 
-#[cfg(feature = "extra-depths")]
 mod extra_depth_sealed {
     pub trait Sealed {}
 }
 
-#[cfg(feature = "extra-depths")]
-macro_rules! define_extra_depths {
-    ($($(#[$doc:meta])* $name:ident = $height:literal),+ $(,)?) => {
+macro_rules! define_tree_depths {
+    ($availability:literal; $($(#[$doc:meta])* $name:ident = $height:literal),+ $(,)?) => {
         $(
             $(#[$doc])*
             #[doc = ""]
-            #[doc = "Available with the `extra-depths` Cargo feature."]
+            #[doc = $availability]
             #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
             pub struct $name;
 
@@ -405,8 +403,19 @@ macro_rules! define_extra_depths {
     };
 }
 
+define_tree_depths!(
+    "This marker selects a standardized parameter set and is available by default.";
+    /// Height 10: 1,024 signatures per key pair.
+    H10 = 10,
+    /// Height 16: 65,536 signatures per key pair.
+    H16 = 16,
+    /// Height 20: 1,048,576 signatures per key pair.
+    H20 = 20,
+);
+
 #[cfg(feature = "extra-depths")]
-define_extra_depths!(
+define_tree_depths!(
+    "Available with the `extra-depths` Cargo feature.";
     /// Height 1: 2 signatures per key pair.
     H1 = 1,
     /// Height 2: 4 signatures per key pair.
@@ -455,16 +464,18 @@ define_extra_depths!(
 ///
 /// Layout: `0xff | family | 0x00 | height`. These values deliberately cannot
 /// be mistaken for an RFC 8391 or NIST SP 800-208 parameter-set identifier.
-#[cfg(feature = "extra-depths")]
 const EXTRA_DEPTH_OID_PREFIX: u32 = 0xff00_0000;
 
-#[cfg(feature = "extra-depths")]
-const fn extra_depth_oid(family: u32, height: u32) -> u32 {
-    EXTRA_DEPTH_OID_PREFIX | (family << 16) | height
+const fn tree_depth_oid(family: u32, height: u32) -> u32 {
+    match height {
+        10 => (family - 1) * 3 + 1,
+        16 => (family - 1) * 3 + 2,
+        20 => (family - 1) * 3 + 3,
+        _ => EXTRA_DEPTH_OID_PREFIX | (family << 16) | height,
+    }
 }
 
-#[cfg(feature = "extra-depths")]
-fn extra_xmss_params(
+fn generic_xmss_params(
     func: u32,
     n: u32,
     padding_len: u32,
@@ -494,15 +505,13 @@ fn extra_xmss_params(
     }
 }
 
-#[cfg(feature = "extra-depths")]
-macro_rules! define_extra_xmss_family {
-    ($name:ident, $display:literal, $family:literal, $func:expr, $n_type:ty, $n:literal, $padding:literal) => {
-        #[doc = concat!("Non-standard ", $display, " XMSS parameter set with a curated tree depth.")]
+macro_rules! define_xmss_family {
+    ($name:ident, $display:literal, [$name10:literal, $name16:literal, $name20:literal], $family:literal, $func:expr, $n_type:ty, $n:literal, $padding:literal) => {
+        #[doc = concat!($display, " XMSS parameter family with a compile-time tree depth.")]
         #[doc = ""]
-        #[doc = concat!("Combine `", stringify!($name), "` with one of the 21 types implementing [`XmssTreeDepth`].")]
+        #[doc = concat!("Use `", stringify!($name), "<H10>`, `<H16>`, or `<H20>` for a standardized parameter set.")]
+        #[doc = "The `extra-depths` feature adds all remaining heights from 1 through 24."]
         #[doc = "See the [`extra_depths`](crate::extra_depths) guide for the complete list and examples."]
-        #[doc = ""]
-        #[doc = "Available with the `extra-depths` Cargo feature."]
         #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
         #[allow(non_camel_case_types)]
         pub struct $name<D: XmssTreeDepth>(PhantomData<D>);
@@ -515,16 +524,21 @@ macro_rules! define_extra_xmss_family {
             type VkLen = TSum<U4, TProd<$n_type, U2>>;
             type SeedLen = TProd<$n_type, U3>;
 
-            const NAME: &'static str = concat!($display, " with extra depth");
+            const NAME: &'static str = match D::HEIGHT {
+                10 => $name10,
+                16 => $name16,
+                20 => $name20,
+                _ => concat!($display, " with extra depth"),
+            };
             const SK_LEN: usize = xmss_sk_len($n, D::HEIGHT as usize, 1);
             const VK_LEN: usize = xmss_vk_len($n);
             const SIG_LEN: usize = xmss_sig_len($n, D::HEIGHT as usize, 1);
             const SEED_LEN: usize = xmss_seed_len($n);
-            const OID: u32 = extra_depth_oid($family, D::HEIGHT);
+            const OID: u32 = tree_depth_oid($family, D::HEIGHT);
             const IS_XMSS: bool = true;
 
             fn xmss_params() -> XmssParams {
-                extra_xmss_params(
+                generic_xmss_params(
                     $func,
                     $n,
                     $padding,
@@ -544,46 +558,86 @@ macro_rules! define_extra_xmss_family {
     };
 }
 
-#[cfg(feature = "extra-depths")]
-define_extra_xmss_family!(XmssSha2_256, "XMSS-SHA2-256", 1, XMSS_SHA2, U32, 32, 32);
-#[cfg(feature = "extra-depths")]
-define_extra_xmss_family!(XmssSha2_512, "XMSS-SHA2-512", 2, XMSS_SHA2, U64, 64, 64);
-#[cfg(feature = "extra-depths")]
-define_extra_xmss_family!(
+define_xmss_family!(
+    XmssSha2_256,
+    "XMSS-SHA2-256",
+    ["XMSS-SHA2_10_256", "XMSS-SHA2_16_256", "XMSS-SHA2_20_256"],
+    1,
+    XMSS_SHA2,
+    U32,
+    32,
+    32
+);
+define_xmss_family!(
+    XmssSha2_512,
+    "XMSS-SHA2-512",
+    ["XMSS-SHA2_10_512", "XMSS-SHA2_16_512", "XMSS-SHA2_20_512"],
+    2,
+    XMSS_SHA2,
+    U64,
+    64,
+    64
+);
+define_xmss_family!(
     XmssShake_256,
     "XMSS-SHAKE-256",
+    [
+        "XMSS-SHAKE_10_256",
+        "XMSS-SHAKE_16_256",
+        "XMSS-SHAKE_20_256"
+    ],
     3,
     XMSS_SHAKE128,
     U32,
     32,
     32
 );
-#[cfg(feature = "extra-depths")]
-define_extra_xmss_family!(
+define_xmss_family!(
     XmssShake_512,
     "XMSS-SHAKE-512",
+    [
+        "XMSS-SHAKE_10_512",
+        "XMSS-SHAKE_16_512",
+        "XMSS-SHAKE_20_512"
+    ],
     4,
     XMSS_SHAKE256,
     U64,
     64,
     64
 );
-#[cfg(feature = "extra-depths")]
-define_extra_xmss_family!(XmssSha2_192, "XMSS-SHA2-192", 5, XMSS_SHA2, U24, 24, 4);
-#[cfg(feature = "extra-depths")]
-define_extra_xmss_family!(
+define_xmss_family!(
+    XmssSha2_192,
+    "XMSS-SHA2-192",
+    ["XMSS-SHA2_10_192", "XMSS-SHA2_16_192", "XMSS-SHA2_20_192"],
+    5,
+    XMSS_SHA2,
+    U24,
+    24,
+    4
+);
+define_xmss_family!(
     XmssShake256_256,
     "XMSS-SHAKE256-256",
+    [
+        "XMSS-SHAKE256_10_256",
+        "XMSS-SHAKE256_16_256",
+        "XMSS-SHAKE256_20_256"
+    ],
     6,
     XMSS_SHAKE256,
     U32,
     32,
     32
 );
-#[cfg(feature = "extra-depths")]
-define_extra_xmss_family!(
+define_xmss_family!(
     XmssShake256_192,
     "XMSS-SHAKE256-192",
+    [
+        "XMSS-SHAKE256_10_192",
+        "XMSS-SHAKE256_16_192",
+        "XMSS-SHAKE256_20_192"
+    ],
     7,
     XMSS_SHAKE256,
     U24,

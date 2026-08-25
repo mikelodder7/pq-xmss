@@ -741,18 +741,21 @@ mod tests {
         let mut pk = vec![0u8; params.pk_bytes as usize];
         let mut sk = vec![0u8; params.sk_bytes];
         let seed: Vec<u8> = (0..params.get_seed_length())
-            .map(|value| value as u8)
+            .map(|value| u8::try_from(value).expect("test seed byte should fit in u8"))
             .collect();
         let mut traversal: TraversalState<U32> =
-            xmssmt_core_seed_keypair(&params, &mut pk, &mut sk, &seed).unwrap();
+            xmssmt_core_seed_keypair(&params, &mut pk, &mut sk, &seed)
+                .expect("test operation should succeed");
 
         for index in 0u8..16 {
             let message = [index];
-            let signature = xmssmt_core_sign(&params, &mut sk, &mut traversal, &message).unwrap();
+            let signature = xmssmt_core_sign(&params, &mut sk, &mut traversal, &message)
+                .expect("test operation should succeed");
             assert_eq!(signature[0], index);
 
             let mut recovered = Vec::new();
-            xmssmt_core_sign_open(&params, &mut recovered, &signature, &pk).unwrap();
+            xmssmt_core_sign_open(&params, &mut recovered, &signature, &pk)
+                .expect("test operation should succeed");
             assert_eq!(recovered, message);
         }
 
